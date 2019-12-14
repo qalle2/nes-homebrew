@@ -10,11 +10,14 @@ My 6502 assembly programs for the [Nintendo Entertainment System](http://en.wiki
 
 ## The programs
 
-### `24balls.asm`
+### 24balls.asm
 Shows 24 bouncing balls.
 
-### `hello.asm`
+![24balls.asm](24balls.png)
+
+### hello.asm
 Prints *Hello, World!*. Only tested on [FCEUX](http://www.fceux.com).
+
 ![hello.asm](hello.png)
 
 ## References
