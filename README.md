@@ -2,6 +2,8 @@
 
 My 6502 assembly programs for the [Nintendo Entertainment System](http://en.wikipedia.org/wiki/Nintendo_Entertainment_System) (NES).
 
+Thanks to [pdroms.de](https://pdroms.de) for archiving some of these programs.
+
 ## How to assemble
 * Install **asm6f**:
   * [GitHub page](https://github.com/freem/asm6f)
@@ -14,6 +16,11 @@ My 6502 assembly programs for the [Nintendo Entertainment System](http://en.wiki
 Shows 24 bouncing balls.
 
 ![24balls.asm](24balls.png)
+
+### colorsquares.asm
+Prints colored squares. On each frame, two adjacent squares trade places.
+
+![colorsquares.asm](colorsquares.png)
 
 ### gradient.asm
 Prints an animated gradient and moving text. Warning: you may get a seizure.
