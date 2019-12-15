@@ -15,6 +15,11 @@ Shows 24 bouncing balls.
 
 ![24balls.asm](24balls.png)
 
+### gradient.asm
+Prints an animated gradient and moving text. Warning: you may get a seizure.
+
+![gradient.asm](gradient.png)
+
 ### hello.asm
 Prints *Hello, World!*. Only tested on [FCEUX](http://www.fceux.com).
 
