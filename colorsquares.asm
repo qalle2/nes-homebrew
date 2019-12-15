@@ -1,3 +1,5 @@
+    ; idea: keep copy of NT&AT data in RAM, edit it, copy changed bytes to VRAM
+
     ; value to fill unused areas with
     fillvalue $ff
 
@@ -13,19 +15,19 @@
     ppu_data   equ $2007
 
     ; RAM
-    frame_counter    equ $00
-    square_x         equ $01  ; 0-15
-    square_y         equ $02  ; 0-14
-    moving_square1_x equ $03
-    moving_square1_y equ $04
-    moving_square2_x equ $05
-    moving_square2_y equ $06
-    old_name1        equ $07
-    old_name2        equ $08
-    old_attr1        equ $09
-    old_attr2        equ $0a
-    temp             equ $0b
-    temp2            equ $0c
+    frame_counter        equ $00
+    square_x             equ $01  ; 0-15
+    square_y             equ $02  ; 0-14
+    moving_square1_x     equ $03
+    moving_square1_y     equ $04
+    moving_square2_x     equ $05
+    moving_square2_y     equ $06
+    square_old_nt_value1 equ $07
+    square_old_nt_value2 equ $08
+    square_old_at_value1 equ $09
+    square_old_at_value2 equ $0a
+    temp                 equ $0b
+    temp2                equ $0c
 
 ; --------------------------------------------------------------------------------------------------
 ; iNES header
@@ -172,7 +174,7 @@ reset:
 nmi:
     inc frame_counter
 
-    ; Keskenaan vaihdettavan nelioparin vasemman tai ylemman nelion sijainti
+    ; the location of the left or top square of the square pair to swap
     ldx frame_counter
     lda shuffle_data, x
     tay
@@ -186,47 +188,46 @@ nmi:
     sta moving_square1_y
     sta moving_square2_y
 
-    ; Nelioparin toinen nelio on joka toisella framella oikealla puolella ja joka toisella
-    ; alapuolella
+    ; the another square of the pair is to the right or below on alternating frames
     txa
     and #%00000001
     tax
-    inc moving_square2_x, x
+    inc moving_square2_x, x  ; moving_square2_x or moving_square2_y
 
-    ; Luetaan ensimmaisen nelion vanha vari
+    ; read current color of first square
     lda moving_square1_x
     sta square_x
     lda moving_square1_y
     sta square_y
     jsr read_square_from_name_table
-    sta old_name1
+    sta square_old_nt_value1
     jsr read_square_from_attribute_table
-    sta old_attr1
+    sta square_old_at_value1
 
-    ; Luetaan toisen nelion vanha vari
+    ; read current color of second square
     lda moving_square2_x
     sta square_x
     lda moving_square2_y
     sta square_y
     jsr read_square_from_name_table
-    sta old_name2
+    sta square_old_nt_value2
     jsr read_square_from_attribute_table
-    sta old_attr2
+    sta square_old_at_value2
 
-    ; Kirjoitetaan toinen nelio uudelleen
-    ldy old_name1
+    ; write new second square
+    ldy square_old_nt_value1
     jsr write_square_to_name_table
-    ldy old_attr1
+    ldy square_old_at_value1
     jsr write_square_to_attribute_table
 
-    ; Kirjoitetaan ensimmainen nelio uudelleen
+    ; write new first square
     lda moving_square1_x
     sta square_x
     lda moving_square1_y
     sta square_y
-    ldy old_name2
+    ldy square_old_nt_value2
     jsr write_square_to_name_table
-    ldy old_attr2
+    ldy square_old_at_value2
     jsr write_square_to_attribute_table
 
     jsr reset_vram_address
@@ -272,7 +273,7 @@ set_name_table_address:
     rts
 
 read_square_from_name_table:
-    ; return value of (square_x, square_y) in A
+    ; Return value of (square_x, square_y) in A.
 
     jsr set_name_table_address
     lda ppu_data
@@ -280,7 +281,7 @@ read_square_from_name_table:
     rts
 
 write_square_to_name_table:
-    ; write Y to name table at (square_x, square_y)
+    ; Write Y to name table at (square_x, square_y).
 
     ; top row
     jsr set_name_table_address
@@ -302,28 +303,35 @@ write_square_to_name_table:
     rts
 
 set_attribute_table_address:
-    ; Asettaa PPU-osoitteeksi Attribute Tablen tavun, johon nelio (square_x, square_y) kuuluu.
-    ; Bitit: square_y: 0000abcd, square_x: 0000efgh --> PPU-osoite: 00100011 11abcefg
+    ; Set VRAM address to (square_x, square_y) in attribute table.
+    ; Bits: square_y: 0000ABCD, square_x: 0000EFGH, VRAM address: 00100011 11ABCEFG
 
+    ; high byte
     lda #$23
-    sta ppu_addr   ; osoitteen ylempi tavu
-
-    ; Osoitteen alempi tavu
-    lda square_y
-    and #%00001110
-    rept 3
-        asl
-    endr
-    ora #%10000000
-    ora square_x
-    sec
-    ror
     sta ppu_addr
+
+    ; low byte
+    lda square_y    ; 0000ABCD
+    and #%00001110  ; 0000ABC0
+    rept 3
+        asl         ; 0ABC0000
+    endr
+    ora #%10000000  ; 1ABC0000
+    ora square_x    ; 1ABCEFGH
+    sec
+    ror             ; 11ABCEFG
+    sta ppu_addr
+
+    ; optimization: replace ora&ora&sec&ror above with:
+    ;     ora square_x    ; 0ABCEFGH
+    ;     lsr             ; 00ABCEFG
+    ;     ora #%11000000  ; 11ABCEFG
+
     rts
 
-which_bit_pair:
-    ; Palauttaa X:ssa nelion (square_x, square_y) sijainnin attribuuttitavun sisalla (0 - 3)
-    ; Bitit: square_y: 0000abcd, square_x: 0000efgh --> sijainti: 000000dh
+get_attribute_byte_bit_position:
+    ; Return position of (square_x, square_y) within attribute byte in X (0-3).
+    ; Bits: square_y: 0000ABCD, square_x: 0000EFGH, position: 000000DH
 
     lda square_x
     lsr
@@ -334,14 +342,14 @@ which_bit_pair:
     rts
 
 read_square_from_attribute_table:
-    ; Lukee Attribute Tablesta nelion (square_x, square_y) arvon (0 - 3) A:han
+    ; Return value of (square_x, square_y) in attribute table in A (0-3).
 
     jsr set_attribute_table_address
-    jsr which_bit_pair
+    jsr get_attribute_byte_bit_position
     lda ppu_data
     lda ppu_data
 
-    ; Vieritetaan olennaiset bitit aarioikealle ja nollataan muut
+    ; shift important bits to least significant positions
     cpx #0
     beq +
 -   lsr
@@ -352,19 +360,19 @@ read_square_from_attribute_table:
     rts
 
 write_square_to_attribute_table:
-    ; Kirjoittaa Attribute Tableen nelion (square_x, square_y) arvoksi Y:n (0 - 3)
+    ; Write Y (0-3) to attribute table at (square_x, square_y).
 
-    ; Luetaan vanha tavu ja selvitetaan, mika bittipari siita taytyy muuttaa
+    ; read old byte, get bit position to change
     jsr set_attribute_table_address
-    jsr which_bit_pair
+    jsr get_attribute_byte_bit_position
     lda ppu_data
     lda ppu_data
 
-    ; Nollataan vanhan tavun muutettavat bitit
+    ; clear bits to change
     and and_masks, x
     sta temp
 
-    ; Vieritetaan nelion uusi arvo oikealle kohdalle ja yhdistetaan se vanhaan tavuun
+    ; shift new bits to correct position, combine with old byte
     tya
     cpx #0
     beq +
