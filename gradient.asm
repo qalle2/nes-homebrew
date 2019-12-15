@@ -70,7 +70,7 @@ reset:
 -   lda chr_data + 256, x
     sta ppu_data
     inx
-    cpx #(16 * 3)
+    cpx #(3 * 16)
     bne -
 
     ; prepare to write name table 0
@@ -178,7 +178,7 @@ reset:
 
     ; unused data
     lda #$ff
-    ldx #(4 * 17)
+    ldx #(letter_count * 4)
 -   sta $00, x
     inx
     bne -
