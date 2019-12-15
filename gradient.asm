@@ -12,11 +12,15 @@ ppu_addr   equ $2006
 ppu_data   equ $2007
 oam_dma    equ $4014
 
+; VRAM
+vram_palette equ $3f00
+
 ; RAM
-FrameLaskuriVarit  equ $0200
-FrameLaskuriTeksti equ $0201
-direction          equ $0202
-temp               equ $0203
+sprite_data   equ $00
+color_counter equ $0200
+text_counter  equ $0201
+direction     equ $0202  ; 0 = animate colors inwards, 1 = animate colors outwards
+temp          equ $0203
 
 ; colors
 bgcol equ $0f
@@ -29,7 +33,7 @@ col6  equ $19
 col7  equ $1a
 col8  equ $1c
 
-; Sprite data is on zero page.
+letter_count equ 17
 
 ; --------------------------------------------------------------------------------------------------
 ; iNES header
@@ -43,32 +47,33 @@ col8  equ $1c
 
     org $c000
 reset:
-
-    lda #$00
+    ; disable rendering
+    lda #%00000000
     sta ppu_ctrl
     sta ppu_mask
 
+    ; wait for start of VBlank, then for another VBlank
     bit ppu_status
 -   bit ppu_status
     bpl -
 -   bit ppu_status
     bpl -
 
-    ; CHR RAM
+    ; copy CHR data to CHR RAM (19 tiles)
     ldx #0
     stx ppu_addr
     stx ppu_addr
--   lda CHRdata, x
+-   lda chr_data, x
     sta ppu_data
     inx
     bne -
--   lda CHRdata+$100, x
+-   lda chr_data + 256, x
     sta ppu_data
     inx
-    cpx #48
+    cpx #(16 * 3)
     bne -
 
-    ; 1st name table
+    ; prepare to write name table 0
     lda #$20
     sta ppu_addr
     lda #$00
@@ -103,7 +108,7 @@ reset:
     sty temp
     bne --
 
-    ; 1st attribute table
+    ; write attribute table 0
     ldy #8
 --  ldx #0
 -   lda attr_table_data, x
@@ -114,7 +119,7 @@ reset:
     dey
     bne --
 
-    ; 2nd name table
+    ; write name table 1
     ldy #0
 --  tya
     and #%00000011
@@ -136,7 +141,7 @@ reset:
     cpy #1
     bne --
 
-    ; 2nd attribute table
+    ; write attribute table 1
     ldy #0
 --  lda attr_table_data, y
     ldx #8
@@ -153,24 +158,22 @@ reset:
     ldx #0
     ldy #0
 -   lda sprite_tiles, y
-    sta $01, x
-    inx
-    inx
-    inx
-    inx
+    sta sprite_data + 1, x
+    rept 4
+        inx
+    endr
     iny
-    cpy #17
+    cpy #letter_count
     bne -
 
     ; attributes
     lda #%00000000
     ldx #0
--   sta $02, x
-    inx
-    inx
-    inx
-    inx
-    cpx #4*17
+-   sta sprite_data + 2, x
+    rept 4
+        inx
+    endr
+    cpx #(letter_count * 4)
     bne -
 
     ; unused data
@@ -181,9 +184,9 @@ reset:
     bne -
 
     ; sprite palette
-    lda #>$3f11
+    lda #>(vram_palette + 4 * 4 + 1)
     sta ppu_addr
-    lda #<$3f11
+    lda #<(vram_palette + 4 * 4 + 1)
     sta ppu_addr
     lda #$0f      ; black
     sta ppu_data
@@ -197,8 +200,10 @@ reset:
 -   bit ppu_status
     bpl -
 
+    ; enable NMI, use name table 1
     lda #%10000001
     sta ppu_ctrl
+
     lda #%00011110
     sta ppu_mask
 
@@ -207,93 +212,88 @@ reset:
 ; --------------------------------------------------------------------------------------------------
 
 nmi:
-    ; FrameLaskuriVarit laskee edestakaisin 0:n ja 255:n välillä
+    ; color_counter counts between 0 and 255
     lda direction
-    beq Nolla
-        ; Yksi
-        inc FrameLaskuriVarit
-        jmp Muutettu
-    Nolla:
-        dec FrameLaskuriVarit
-    Muutettu:
-    bne EiNolla
-        lda direction
-        eor #%00000001
-        sta direction
-        EiNolla:
+    beq +
+    ; animate colors outwards
+    inc color_counter
+    jmp ++
++   ; animate colors inwards
+    dec color_counter
+++  bne +
+    ; color_counter is zero; change direction
+    lda direction
+    eor #%00000001
+    sta direction
++
 
-    ; Taustagrafiikkapalettien vaihto
-    lda #$3f
+    ; change background palettes
+    lda #>vram_palette
     sta ppu_addr
-    lda #$00
+    lda #<vram_palette
     sta ppu_addr
-    lda FrameLaskuriVarit
+    lda color_counter
     and #%00001110
-    asl a
-    asl a
-    asl a
+    rept 3
+        asl
+    endr
     tax
     ldy #16
-    PalVaihtoSilm:
-        lda palettes, x
-        sta ppu_data
-        inx
-        dey
-        bne PalVaihtoSilm
+-   lda palettes, x
+    sta ppu_data
+    inx
+    dey
+    bne -
 
     lda #$00
     sta ppu_addr
     sta ppu_addr
 
-    ; Name Tablen valinta
-    lda FrameLaskuriVarit
+    ; name table selection
+    lda color_counter
     and #%10000000
-    asl a
-    rol a
+    asl
+    rol
     eor direction
     ora #%10000000
     sta ppu_ctrl
 
-    ; Pyörivä teksti (17 spriteä)
-    inc FrameLaskuriTeksti
-    ldy FrameLaskuriTeksti   ; spritejen kulmat eli paikat ympyrän kehällä
-    ldx #0                   ; silmukkalaskuri
-    SprSilm:
-        stx temp   ; X talteen
+    ; text
+    inc text_counter
+    ldy text_counter   ; angles (positions of sprites on circle arc)
+    ldx #0             ; which letter
+-   stx temp   ; store X
+    ; set Y position
+    txa
+    asl
+    asl
+    tax
+    lda sine_table, y
+    sta $00, x
+    ; increase angle by 90 degrees
+    tya
+    clc
+    adc #$40
+    tay
+    ; set X position
+    lda sine_table, y
+    clc
+    adc #9
+    sta $03, x
+    ; restore X
+    ldx temp
+    ; decrease angle for next letter
+    tya
+    sec
+    sbc angle_changes, x
+    tay
+    ; end loop
+    inx
+    cpx #letter_count
+    bne -
 
-        ; Asetetaan spriten Y-koordinaatti
-        txa
-        asl a
-        asl a
-        tax
-        lda sine_table, y
-        sta $00, x
-
-        ; Lisätään kulmaa neljänneskierros
-        tya
-        clc
-        adc #$40
-        tay
-
-        ; Asetetaan spriten X-koordinaatti
-        lda sine_table, y
-        clc
-        adc #9
-        sta $03, x
-
-        ldx temp   ; X takaisin
-
-        ; Vähennetään kulmaa sen mukaisesti, monennessako spritessä ollaan
-        tya
-        sec
-        sbc angle_changes, x
-        tay
-
-        inx
-        cpx #17
-        bne SprSilm
-
-    lda #$00
+    ; update sprite data
+    lda #>sprite_data
     sta oam_dma
     rti
 
@@ -347,7 +347,7 @@ sine_table:
 ; --------------------------------------------------------------------------------------------------
 ; CHR data
 
-CHRdata:
+chr_data:
     hex   ff ff ff ff ff ff ff ff   00 00 00 00 00 00 00 00   ; $00: color 1
     hex   55 aa 55 aa 55 aa 55 aa   aa 55 aa 55 aa 55 aa 55   ; $01: color 1&2 (dithered)
     hex   00 00 00 00 00 00 00 00   ff ff ff ff ff ff ff ff   ; $02: color 2
