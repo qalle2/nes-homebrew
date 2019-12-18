@@ -18,7 +18,7 @@ Shows 24 bouncing balls.
 ![24balls.asm](24balls.png)
 
 ### brainfuck.asm
-KHS-NES-Brainfuck, a Brainfuck interpreter.
+KHS-NES-Brainfuck, a Brainfuck interpreter. The programs can use 256 bytes of RAM. Spaces are for readability only.
 
 ![brainfuck.asm](brainfuck.png)
 

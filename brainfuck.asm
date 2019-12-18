@@ -1,5 +1,3 @@
-; KHS-NES-Brainfuck
-
     ; byte to fill unused areas with
     fillvalue $ff
 
@@ -8,22 +6,22 @@
 
 ; CPU memory
 
-program_status    equ $00  ; 0 = editing, 1 = running, 2 = asking for input
+mode              equ $00  ; 0 = editing, 1 = running, 2 = asking for input
 joypad_status     equ $01
 program_length    equ $02  ; 0-255
 pointer           equ $03  ; 2 bytes
 output_buffer     equ $05  ; 1 byte
 output_buffer_len equ $06  ; 0-1
 output_char_cnt   equ $07  ; number of characters printed by the Brainfuck program
-char_x            equ $08  ; virtual keyboard - X position (0-15)
-char_y            equ $09  ; virtual keyboard - Y position (0-5)
-input_char        equ $0A  ; virtual keyboard - character (32-127)
-temp              equ $0B
+keyboard_x        equ $08  ; virtual keyboard - X position (0-15)
+keyboard_y        equ $09  ; virtual keyboard - Y position (0-5)
+input_char        equ $0a  ; virtual keyboard - character (32-127)
+temp              equ $0b
 
-brainfuck_code1    equ $0200  ; code with spaces (255 bytes)
-brainfuck_code2    equ $0300  ; code without spaces (255 bytes)
-brainfuck_brackets equ $0400  ; target addresses of "[" and "]" (255 bytes)
-brainfuck_ram      equ $0500  ; RAM (256 bytes)
+program_original equ $0200  ; code with spaces (255 bytes)
+program_stripped equ $0300  ; code without spaces (255 bytes)
+brackets         equ $0400  ; target addresses of "[" and "]" (255 bytes)
+brainfuck_ram    equ $0500  ; RAM (256 bytes)
 
 sprite_data equ $0600  ; 256 bytes
 
@@ -37,8 +35,9 @@ joypad1    equ $4016
 
 ; PPU memory
 
-vram_name_table0 equ $2000
-vram_palette     equ $3f00
+vram_name_table0      equ $2000
+vram_attribute_table0 equ $23c0
+vram_palette          equ $3f00
 
 ; non-address constants
 
@@ -53,7 +52,8 @@ button_right  equ 1 << 0
 
 terminator equ $00
 
-sprite_count equ 2
+sprite_count      equ 2
+instruction_count equ 11
 
 black equ $0f
 white equ $30
@@ -80,16 +80,15 @@ endm
 
     org $c000
 reset:
-
     lda #$00
-    sta ppu_ctrl
-    sta ppu_mask
+    sta ppu_ctrl  ; disable NMI
+    sta ppu_mask  ; hide background&sprites
     sta joypad_status
     sta program_length
 
     ; clear Brainfuck code
     tax
--   sta brainfuck_code1, x
+-   sta program_original, x
     inx
     bne -
 
@@ -139,7 +138,7 @@ reset:
     sty ppu_addr
     sty ppu_addr
 chr_data_copy_loop:
---  lda (pointer), y
+    lda (pointer), y
     sta ppu_data
     iny
     ; if source offset is a multiple of eight, write a blank bitplane to complete the character
@@ -159,17 +158,17 @@ chr_data_copy_loop:
     cmp #((>CHRdata) + 8)
     bne chr_data_copy_loop
 
-    ; ??
-    lda #>AjoTila
+    ; set high byte of pointer to run mode
+    lda #>run_mode
     sta pointer + 1
 
 edit_mode:
     lda #$00
     sta ppu_ctrl
     sta ppu_mask
-    sta program_status
-    sta char_x
-    sta char_y
+    sta mode
+    sta keyboard_x
+    sta keyboard_y
 
     ; set up name table 0 and attribute table 0
 
@@ -181,7 +180,7 @@ edit_mode:
     jsr print_rle_data
     ; print Brainfuck code
     ldx #0
--   lda brainfuck_code1, x
+-   lda program_original, x
     sta ppu_data
     inx
     bne -
@@ -209,7 +208,7 @@ wait_for_execution_start:
     sta ppu_mask
 
     ; wait until we exit the editor in the NMI routine
--   lda program_status
+-   lda mode
     beq -
 
     ; start execution
@@ -218,327 +217,314 @@ wait_for_execution_start:
     lda #%00000000
     sta ppu_ctrl
 
-    ; TODO: translate & clean up from here on
-
-; Kopioidaan Brainfuck-koodin alkupuoli nayttomuistista brainfuck_code1:een
+    ; copy Brainfuck program from VRAM to RAM
+    ; first half
     wait_for_start_of_vblank
-    lda #$22
-    ldx #$00
+    lda #>(vram_name_table0 + 16 * 32)
+    ldx #<(vram_name_table0 + 16 * 32)
     jsr set_vram_address
     lda ppu_data
-    KoodiKopSilm1:
-        lda ppu_data
-        sta brainfuck_code1, x
-        inx
-        bpl KoodiKopSilm1
+-   lda ppu_data
+    sta program_original, x
+    inx
+    bpl -
     jsr reset_vram_address
-
-; Kopioidaan Brainfuck-koodin loppupuoli nayttomuistista brainfuck_code1:een
+    ; second half
     wait_for_start_of_vblank
-    lda #$22
-    ldx #$80
+    lda #>(vram_name_table0 + 20 * 32)
+    ldx #<(vram_name_table0 + 20 * 32)
     jsr set_vram_address
     lda ppu_data
-    KoodiKopSilm2:
-        lda ppu_data
-        sta brainfuck_code1, x
-        inx
-        bne KoodiKopSilm2
+-   lda ppu_data
+    sta program_original, x
+    inx
+    bne -
     jsr reset_vram_address
 
-; Tyhjennetaan brainfuck_code2
+    ; copy program without spaces to another array
     lda #$00
     tax
-    TyhjSilm:
-        sta brainfuck_code2, x
-        inx
-        bne TyhjSilm
-
-; Kopioidaan brainfuck_code1:n sisalto brainfuck_code2:een ilman valilyonteja
+-   sta program_stripped, x
+    inx
+    bne -
     tay
-    KoodiKopSilm3:
-        lda brainfuck_code1, x
-        cmp #$20  ; space
-        beq EiOteta
-            sta brainfuck_code2, y
-            iny
-            EiOteta:
-        inx
-        bne KoodiKopSilm3
+-   lda program_original, x
+    cmp #$20  ; space
+    beq +
+    sta program_stripped, y
+    iny
++   inx
+    bne -
 
-; Otetaan muistiin kustakin sulusta eli [:sta tai ]:sta, missa sita vastaava ] tai [ sijaitsee.
-; Y: silmukkalaskuri. Pino: aukinaisten sulkujen osoitteet.
+    ; for each bracket, store address of corresponding bracket
     ldy #0
     dex
-    txs
-    SulkuKeruuSilm:
-        lda brainfuck_code2, y
+    txs     ; initialize stack pointer to $ff (we haven't done this before; the stack is empty)
+brackets_loop:
+    lda program_stripped, y
+    cmp #'['
+    bne +
+    ; push current address
+    tya
+    pha
+    jmp character_done
++   cmp #']'
+    bne character_done
+    ; pull address of previous opening bracket; exit if invalid (if stack underflowed)
+    pla
+    tsx
+    beq brackets_done
+    ; for current bracket, store that address
+    sta brackets, y
+    ; for that bracket, store current address
+    tax
+    tya
+    sta brackets, x
+character_done:
+    iny
+    bne brackets_loop
+    ; make Y 255 so we can distinguish between different errors, if any (if we had exited because
+    ; of a closing bracket without matching opening bracket, Y would be 0-254)
+    dey
+brackets_done:
 
-        cmp #'['
-        bne EiAlkusulku
-            ; Nykyisen kaskyn osoite pinoon
-            tya
-            pha
-            jmp MerkkiTulkittu
-            EiAlkusulku:
-
-        cmp #']'
-        bne MerkkiTulkittu
-            ; Nykyisen kaskyn vastakaskyksi edellinen avattu sulku, ja painvastoin
-            pla
-            tsx
-            beq PinonAlivuoto
-            sta brainfuck_brackets, y
-            tax
-            tya
-            sta brainfuck_brackets, x
-            MerkkiTulkittu:
-
-        iny
-        bne SulkuKeruuSilm
-        dey   ; kertoo, etta alivuotoa ei tapahtunut
-        PinonAlivuoto:
-
-; Onko alku- ja loppusulkuja sama maara
+    ; if stack pointer is not $ff, print an error message; Y reveals type of error
     tsx
     inx
-    beq SulutKunnossa
-        ; Naytetaan virheilmoitus ja odotetaan napinpainallusta
-        wait_for_start_of_vblank
-        lda #$23
-        ldx #$20
-        jsr set_vram_address
-        ldx #(string_opening_bracket - strings)
-        iny
-        beq EiAlivuotoa
-            ldx #(string_closing_bracket - strings)
-            EiAlivuotoa:
-        jsr TulostaTekstidataa
-        jsr reset_vram_address
-        OdotaB1:
-            jsr LueOhjain
-            sta joypad_status
-            and #button_b
-            beq OdotaB1
+    beq brackets_ok
+    wait_for_start_of_vblank
+    lda #>(vram_name_table0 + 25 * 32)
+    ldx #<(vram_name_table0 + 25 * 32)
+    jsr set_vram_address
+    ldx #(string_opening_bracket - strings)
+    iny
+    beq +
+    ldx #(string_closing_bracket - strings)
++   jsr print_string
+    jsr reset_vram_address
+    ; wait for button press
+-   jsr read_joypad
+    sta joypad_status
+    and #button_b
+    beq -
+    ; return to edit mode
+    dec mode
+    wait_for_start_of_vblank
+    lda #$23
+    ldx #$20
+    jsr set_vram_address
+    lda #$20  ; space
+    ldx #32
+    jsr write_vram
+    jsr reset_vram_address
+    jmp wait_for_execution_start
 
-        ; Palataan editointitilaan
-        dec program_status
-        wait_for_start_of_vblank
-        lda #$23
-        ldx #$20
-        jsr set_vram_address
-        lda #$20  ; space
-        ldx #32
-        jsr write_vram
-        jsr reset_vram_address
-        jmp wait_for_execution_start
-
-        SulutKunnossa:
-
+brackets_ok:
+    ; disable rendering
     lda #%00000000
     sta ppu_mask
 
-; Vaihdetaan kunkin brainfuck_code2:n kaskyn tilalle osoite, jossa kaskyn suorittava ohjelmanpatka on.
-; Kursori eli "_" on kasky, joka lopettaa ohjelman.
+    ; in the stripped program, replace each instruction with the offset of the subroutine that
+    ; executes that instruction; the cursor ("_") is an instruction that ends the program
     ldx #0
-    TulkintaSilm1:
-        lda brainfuck_code2, x
-        ldy #0
-        TulkintaSilm2:
-            cmp instructions, y
-            beq KaskyTulkittu
-            iny
-            cpy #10
-            bne TulkintaSilm2
-            KaskyTulkittu:
-        lda instruction_offsets, y
-        sta brainfuck_code2, x
-        inx
-        bne TulkintaSilm1
+instruction_replace_loop:
+    lda program_stripped, x
+    ldy #0
+-   cmp instructions, y
+    beq +
+    iny
+    cpy #(instruction_count - 1)
+    bne -
+    ; if no match, (instruction_count - 1) is the "end program" instruction
++   lda instruction_offsets, y
+    sta program_stripped, x
+    inx
+    bne instruction_replace_loop
 
-; Tyhjennetaan Brainfuck-RAM
+    ; clear RAM for the Brainfuck program
     txa
-    BFRAMtyhj:
-        sta brainfuck_ram, x
-        inx
-        bne BFRAMtyhj
+-   sta brainfuck_ram, x
+    inx
+    bne -
 
-; Kirjoitetaan Name Table uudelleen
-    lda #$20
-    jsr set_vram_address
+    ; rewrite name table
+    lda #>vram_name_table0
+    jsr set_vram_address  ; X is still 0
     ldx #(rle_data_code_execution_top - rle_data)
     jsr print_rle_data
     ldx #(string_running - strings)
-    jsr TulostaTekstidataa
+    jsr print_string
     lda #$20  ; space
     ldx #28
     jsr write_vram
-
-    ; Virtuaalinappaimisto
-    ldx #32   ; ASCII-koodi
-    VirtuSilm:
-        txa
-        and #%00001111
-        bne EiRivinvaihtoa
-            lda #$20  ; space
-            ldy #16
-            VirtuValiSilm:
-                sta ppu_data
-                dey
-                bne VirtuValiSilm
-            EiRivinvaihtoa:
-        stx ppu_data
-        inx
-        bpl VirtuSilm
-
+    ; virtual keyboard
+    ldx #32   ; ASCII code
+virtual_keyboard_loop:
+    txa
+    and #%00001111
+    bne +
+    ; end of line; print 16 spaces
+    lda #$20  ; space
+    ldy #16
+-   sta ppu_data
+    dey
+    bne -
++   stx ppu_data
+    inx
+    bpl virtual_keyboard_loop
+    ; fill rest of name table
     lda #$20  ; space
     ldx #136
     jsr write_vram
 
-; Attribute Tablessa virtuaalinappaimisto piiloon
+    ; write attribute table - hide virtual keyboard for now
     lda #%01010101
-    jsr AsetaVirtuNappTila
+    jsr set_virtual_keyboard_status
 
     jsr reset_vram_address
     wait_for_start_of_vblank
 
+    ; enable NMI
     lda #%10000000
     sta ppu_ctrl
+
+    ; enable background
     lda #%00001010
     sta ppu_mask
 
-; Varsinainen Brainfuck-koodin suoritus
-    jmp AjoTila
-    org $C300
-AjoTila:
+    ; the real execution of the Brainfuck program
+    jmp run_mode
 
+    org $c300
+run_mode:
     ldx #$00
     stx output_buffer_len
     stx output_char_cnt
 
-; Y: osoite Brainfuck-koodissa. X: osoite Brainfuck-RAM:issa.
-    ldy #$FF
-SuoritusSilm:
+    ; Y: address in Brainfuck code
+    ; X: address in Brainfuck RAM
+    ldy #$ff
+execution_loop:
     iny
-    lda brainfuck_code2, y
+    lda program_stripped, y
     sta pointer + 0
     jmp (pointer)
 
-    KaksiPlus:
-        inc brainfuck_ram, x
-    Plus:
-        inc brainfuck_ram, x
-        jmp SuoritusSilm
+double_plus:
+    inc brainfuck_ram, x
+plus:
+    inc brainfuck_ram, x
+    jmp execution_loop
 
-    KaksiMiinus:
-        dec brainfuck_ram, x
-    Miinus:
-        dec brainfuck_ram, x
-        jmp SuoritusSilm
+double_minus:
+    dec brainfuck_ram, x
+minus:
+    dec brainfuck_ram, x
+    jmp execution_loop
 
-    Vasen:
-        dex
-        jmp SuoritusSilm
+left:
+    dex
+    jmp execution_loop
 
-    Oikea:
-        inx
-        jmp SuoritusSilm
+right:
+    inx
+    jmp execution_loop
 
-    Alkusulku:
-        lda brainfuck_ram, x
-        bne SuoritusSilm
-            lda brainfuck_brackets, y
-            tay
-        jmp SuoritusSilm
+opening_bracket:
+    lda brainfuck_ram, x
+    bne execution_loop
+    lda brackets, y
+    tay
+    jmp execution_loop
 
-    Loppusulku:
-        lda brainfuck_ram, x
-        beq SuoritusSilm
-            lda brainfuck_brackets, y
-            tay
-        jmp SuoritusSilm
+closing_bracket:
+    lda brainfuck_ram, x
+    beq execution_loop
+    lda brackets, y
+    tay
+    jmp execution_loop
 
-    Piste:
-        ; Laitetaan merkki puskuriin ja odotetaan, etta se tyhjennetaan NMI:ssa
-        lda brainfuck_ram, x
-        sta output_buffer
-        inc output_buffer_len
-        OdotaPuskTyhj:
-            lda output_buffer_len
-            bne OdotaPuskTyhj
-        lda output_char_cnt
-        beq PoistuOhjelmasta   ; jos tulostettu 256 merkkia
-        jmp SuoritusSilm
+period:
+    ; add character to buffer; wait for NMI routine to flush it
+    lda brainfuck_ram, x
+    sta output_buffer
+    inc output_buffer_len
+-   lda output_buffer_len
+    bne -
+    lda output_char_cnt
+    beq end_program   ; 256 characters printed
+    jmp execution_loop
 
-    Pilkku:
-        stx temp
-
-        ; Teksti "Character?"
-        wait_for_start_of_vblank
-        lda #$22
-        ldx #$40
-        jsr set_vram_address
-        ldx #(string_input - strings)
-        jsr TulostaTekstidataa
-
-        ; Virtuaalinappaimisto nakyviin
-        lda #%00000000
-        jsr AsetaVirtuNappTila
-        jsr reset_vram_address
-
-        ; sprite_data nakyviin
-        lda #%00011110
-        sta ppu_mask
-
-        ; Kayttajalta kysytaan syote NMI:ssa
-        inc program_status
-        OdotaNMIta:
-            ldx program_status
-            dex
-            bne OdotaNMIta
-
-        ; Teksti "Running..."
-        lda #$22
-        ldx #$40
-        jsr set_vram_address
-        ldx #(string_running - strings)
-        jsr TulostaTekstidataa
-
-        ; Virtuaalinappaimisto piiloon
-        lda #%01010101
-        jsr AsetaVirtuNappTila
-        jsr reset_vram_address
-
-        ; sprite_data piiloon
-        lda #%00001010
-        sta ppu_mask
-
-        ldx temp
-        lda input_char
-        sta brainfuck_ram, x
-        jmp SuoritusSilm
-
-    PoistuOhjelmasta:
-
-; Brainfuck-ohjelma on ajettu
-    lda #%00000000
-    sta ppu_ctrl
+comma:
+    stx temp
+    ; print message asking for input
     wait_for_start_of_vblank
-
-    ; Teksti "Finished."
-    lda #$22
-    ldx #$40
+    lda #>(vram_name_table0 + 18 * 32)
+    ldx #<(vram_name_table0 + 18 * 32)
     jsr set_vram_address
-    ldx #(string_finished - strings)
-    jsr TulostaTekstidataa
+    ldx #(string_input - strings)
+    jsr print_string
+
+    ; show virtual keyboard
+    lda #%00000000
+    jsr set_virtual_keyboard_status
     jsr reset_vram_address
 
-    ; Odota, etta painetaan B
-    OdotaB2:
-        jsr LueOhjain
-        sta joypad_status
-        and #button_b
-        beq OdotaB2
+    ; show sprites
+    lda #%00011110
+    sta ppu_mask
+
+    ; wait for NMI routine to provide input
+    inc mode
+-   ldx mode
+    dex
+    bne -
+
+    ; restore text "Running..."
+    lda #>(vram_name_table0 + 18 * 32)
+    ldx #<(vram_name_table0 + 18 * 32)
+    jsr set_vram_address
+    ldx #(string_running - strings)
+    jsr print_string
+
+    ; hide virtual keyboard
+    lda #%01010101
+    jsr set_virtual_keyboard_status
+    jsr reset_vram_address
+
+    ; hide sprites
+    lda #%00001010
+    sta ppu_mask
+
+    ldx temp  ; restore X
+
+    ; store input
+    lda input_char
+    sta brainfuck_ram, x
+    jmp execution_loop
+
+end_program:
+    ; the Brainfuck program has finished
+
+    ; disable NMI
+    lda #%00000000
+    sta ppu_ctrl
+
+    wait_for_start_of_vblank
+
+    ; print the text "Finished."
+    lda #>(vram_name_table0 + 18 * 32)
+    ldx #<(vram_name_table0 + 18 * 32)
+    jsr set_vram_address
+    ldx #(string_finished - strings)
+    jsr print_string
+    jsr reset_vram_address
+
+    ; wait for button press
+-   jsr read_joypad
+    sta joypad_status
+    and #button_b
+    beq -
 
     jmp edit_mode
 
@@ -546,6 +532,8 @@ SuoritusSilm:
 ; Non-maskable interrupt routine
 
 nmi:
+    ; I know php&plp in NMI is unnecessary, but I want to keep the binary identical to the old
+    ; version
     php
     pha
     txa
@@ -553,220 +541,203 @@ nmi:
     tya
     pha
 
-    ldx program_status
-    beq NMI_editointitila
+    ; continue according to the mode we're in
+    ldx mode
+    beq nmi_edit_mode
     dex
-    beq NMI_ajotila
-    jmp NMI_syotetila
+    beq nmi_run_mode
+    jmp nmi_input_mode
 
-    NMI_editointitila:
-        jsr LueOhjain
+nmi_edit_mode:
+    jsr read_joypad
 
-        ; Ei jatketa, jos nappien tila on sama kuin edellisella kerralla
-        cpx joypad_status
-        bne Jatka1
-        jmp PoistuNMIsta
-        Jatka1:
-        stx joypad_status
+    ; exit if joypad status hasn't changed
+    cpx joypad_status
+    bne +
+    jmp nmi_exit
++   stx joypad_status
 
-        ; Jos kirjoitettuja merkkeja on alle 255 ja on painettu nappia, jolla lisataan merkki,
-        ; lisataan kyseinen merkki ja poistutaan NMI:sta.
-        ldx program_length
-        inx
-        beq NapitLuettu1
-            ldy #10
-            TutkiNappiSilm:
-                lda instruction_buttons, y
-                cmp joypad_status
-                bne EiOllutTamaNappi
-                    lda #$22
-                    ldx program_length
-                    jsr set_vram_address
-                    lda instructions, y
-                    sta ppu_data
-                    lda #'_'
-                    sta ppu_data
-                    inc program_length
-                    jmp NollaaJaPoistuNMIsta
-                    EiOllutTamaNappi:
-                dey
-                bpl TutkiNappiSilm
-            NapitLuettu1:
+    ; if trying to enter a character and there's less than 255 of them, add the character and exit
+    ldx program_length
+    inx
+    beq character_entry_end
+    ldy #(instruction_count - 1)
+-   lda instruction_buttons, y
+    cmp joypad_status
+    bne +
+    ; print the character over the old cursor; also print the new cursor
+    lda #>(vram_name_table0 + 16 * 32)
+    ldx program_length
+    jsr set_vram_address
+    lda instructions, y
+    sta ppu_data
+    lda #'_'
+    sta ppu_data
+    inc program_length
+    jmp reset_vram_address_and_exit_nmi
++   dey
+    bpl -
+character_entry_end:
 
-        ; Jos on painettu start-vasen ja kirjoitettu ainakin yksi merkki, poistetaan viimeinen
-        ; ja poistutaan NMI:sta.
-        lda program_length
-        beq EiBackSpacea
-        lda joypad_status
-        cmp #(button_start | button_left)
-        bne EiBackSpacea
-            dec program_length
-            lda #$22
-            ldx program_length
-            jsr set_vram_address
-            lda #"_"
-            sta ppu_data
-            lda #$20  ; space
-            sta ppu_data
-            jmp NollaaJaPoistuNMIsta
-            EiBackSpacea:
+    ; if "backspace" pressed and at least one character written, delete last character and exit
+    lda program_length
+    beq +
+    lda joypad_status
+    cmp #(button_start | button_left)
+    bne +
+    dec program_length
+    ; print cursor over last character and space over old cursor
+    lda #>(vram_name_table0 + 16 * 32)
+    ldx program_length
+    jsr set_vram_address
+    lda #"_"
+    sta ppu_data
+    lda #$20  ; space
+    sta ppu_data
+    jmp reset_vram_address_and_exit_nmi
 
-        ; Jos on painettu select-start, ajetaan ohjelma
-        lda joypad_status
-        cmp #(button_select | button_start)
-        bne EiAjeta
-            inc program_status
-            EiAjeta:
++   ; run the program if requested
+    lda joypad_status
+    cmp #(button_select | button_start)
+    bne +
+    inc mode
++   jmp nmi_exit
 
-        jmp PoistuNMIsta
+nmi_run_mode:
+    jsr read_joypad
+    sta joypad_status
 
-    NMI_ajotila:
-        jsr LueOhjain
-        sta joypad_status
+    ; exit if requested
+    and #button_b
+    beq +
+    jmp edit_mode
++
 
-        ; Jos on painettu B, keskeytetaan
-        and #button_b
-        beq EiKeskeyteta
-            jmp edit_mode
-            EiKeskeyteta:
+    ; print character from buffer if necessary
+    lda output_buffer_len
+    bne +
+    jmp nmi_exit
++   lda output_buffer
+    cmp #$0a
+    beq newline
+    lda #>(vram_name_table0 + 8 * 32)
+    ldx output_char_cnt
+    jsr set_vram_address
+    lda output_buffer
+    sta ppu_data
+    inc output_char_cnt
+    dec output_buffer_len
+    jmp reset_vram_address_and_exit_nmi
+newline:
+    ; count rest of line towards maximum number of characters to output
+    lda output_char_cnt
+    and #%11100000
+    adc #(32 - 1)  ; carry still set by cmp
+    sta output_char_cnt
+    dec output_buffer_len
+    jmp nmi_exit
 
-        ; Jos puskurissa on merkki, tulostetaan se
-        lda output_buffer_len
-        bne Jatka2
-        jmp PoistuNMIsta
-        Jatka2:
-            lda output_buffer
-            cmp #$0A
-            beq Rivinvaihto
-                lda #$21
-                ldx output_char_cnt
-                jsr set_vram_address
-                lda output_buffer
-                sta ppu_data
-                inc output_char_cnt
-                dec output_buffer_len
-                jmp NollaaJaPoistuNMIsta
-            Rivinvaihto:
-                lda output_char_cnt
-                and #%11100000
-                adc #31
-                sta output_char_cnt
-                dec output_buffer_len
-                jmp PoistuNMIsta
+nmi_input_mode:
+    jsr read_joypad
 
-    NMI_syotetila:
-        jsr LueOhjain
+    ; react to buttons if joypad status has changed
+    cmp joypad_status
+    beq keyboard_end
+    sta joypad_status
+    lsr
+    bcs keyboard_right   ; button: right
+    lsr
+    bcs keyboard_left    ; button: left
+    lsr
+    bcs keyboard_down    ; button: down
+    lsr
+    bcs keyboard_up      ; button: up
+    lsr
+    lsr
+    lsr
+    bcs keyboard_quit    ; button: B
+    lsr
+    bcs keyboard_accept  ; button: A
+    jmp keyboard_end   ; none of the above
+keyboard_left:
+    ldx keyboard_x
+    dex
+    txa
+    and #%00001111
+    sta keyboard_x
+    jmp keyboard_end
+keyboard_right:
+    ldx keyboard_x
+    inx
+    txa
+    and #%00001111
+    sta keyboard_x
+    jmp keyboard_end
+keyboard_up:
+    ldx keyboard_y
+    dex
+    bpl +
+    ldx #5
++   stx keyboard_y
+    jmp keyboard_end
+keyboard_down:
+    ldx keyboard_y
+    inx
+    cpx #6
+    bne +
+    ldx #0
++   stx keyboard_y
+    jmp keyboard_end
+keyboard_accept:
+    dec mode  ; back to run mode
+    jmp keyboard_end
+keyboard_quit:
+    jmp edit_mode
+keyboard_end:
 
-        ; Ei reagoida nappeihin, jos niiden tila on sama kuin edellisella kerralla
-        cmp joypad_status
-        beq NapitLuettu
-        sta joypad_status
+    ; Y position of sprites
+    lda keyboard_y
+    asl
+    asl
+    asl
+    tax
+    adc #(20 * 8 - 1)
+    sta sprite_data + 0
+    sta sprite_data + 4
 
-        lsr
-        bcs Oikea2
-        lsr
-        bcs Vasen2
-        lsr
-        bcs Ala
-        lsr
-        bcs Yla
-        lsr
-        lsr
-        lsr
-        bcs Pois
-        lsr
-        bcs Valitse
+    ; sprite 0 tile and the entered character
+    txa
+    asl       ; keyboard_y * 16
+    adc #$20  ; keyboard starts at character $20
+    adc keyboard_x
+    sta sprite_data + 1
+    cmp #$7f  ; store last symbol on keyboard as real newline
+    bne +
+    lda #$0a
++   sta input_char
 
-        jmp NapitLuettu
+    ; X position of sprites
+    lda keyboard_x
+    asl
+    asl
+    asl
+    adc #(8 * 8)
+    sta sprite_data + 3
+    sta sprite_data + 4 + 3
 
-        Vasen2:
-            ldx char_x
-            dex
-            txa
-            and #%00001111
-            sta char_x
-            jmp NapitLuettu
+    lda #>sprite_data
+    sta oam_dma
 
-        Oikea2:
-            ldx char_x
-            inx
-            txa
-            and #%00001111
-            sta char_x
-            jmp NapitLuettu
-
-        Yla:
-            ldx char_y
-            dex
-            bpl EiTaysille
-                ldx #5
-                EiTaysille:
-            stx char_y
-            jmp NapitLuettu
-
-        Ala:
-            ldx char_y
-            inx
-            cpx #6
-            bne EiNollaan
-                ldx #0
-                EiNollaan:
-            stx char_y
-            jmp NapitLuettu
-
-        Valitse:
-            dec program_status
-            jmp NapitLuettu
-
-        Pois:
-            jmp edit_mode
-
-        NapitLuettu:
-
-        ; Spritejen Y
-        lda char_y
-        asl
-        asl
-        asl
-        tax
-        adc #$9F
-        sta sprite_data + 0
-        sta sprite_data + 4
-
-        ; Spriten 0 kuva ja input_char
-        txa
-        asl
-        adc #$20
-        adc char_x
-        sta sprite_data + 1
-        cmp #127
-        bne EiVirtuNappEnter
-            lda #$0A
-            EiVirtuNappEnter:
-        sta input_char
-
-        ; Spritejen X
-        lda char_x
-        asl
-        asl
-        asl
-        adc #$40
-        sta sprite_data + 3
-        sta sprite_data + 7
-
-        lda #>sprite_data
-        sta oam_dma
-
-    NollaaJaPoistuNMIsta:
-        jsr reset_vram_address
-    PoistuNMIsta:
-        pla
-        tay
-        pla
-        tax
-        pla
-        plp
-        rti
+reset_vram_address_and_exit_nmi:
+    jsr reset_vram_address
+nmi_exit:
+    pla
+    tay
+    pla
+    tax
+    pla
+    plp  ; see note above
+    rti
 
 ; --------------------------------------------------------------------------------------------------
 ; Subroutines
@@ -789,84 +760,79 @@ write_vram:
     bne -
     rts
 
-TulostaTekstidataa:
-    ; Tulostaa taulukosta strings tavut X:sta seuraavaan loppumerkkiin ($00).
-    TekstiSilm:
-        lda strings, x
-        beq LoppumerkkiHavaittu1
-        sta ppu_data
-        inx
-        bne TekstiSilm
-    LoppumerkkiHavaittu1:
-    rts
+print_string:
+    ; print a null-terminated string in table strings starting from offset X
+-   lda strings, x
+    beq +
+    sta ppu_data
+    inx
+    bne -
++   rts
 
 print_rle_data:
-    ; Tulostaa taulukosta rle_data tavut X:sta seuraavaan loppumerkkiin.
-    ; RLE-data on jaettu lohkoihin. Lohkon 1. tavu kertoo lohkon tyypin:
-    ;     $00       = loppumerkki
-    ;     $01 - $7F = pakattu,     pituus 2 - 128 tavua
-    ;     $80 - $FF = pakkaamaton, pituus 1 - 128 tavua
-    ; Lohkon muut tavut ovat varsinainen data (pakatussa lohkossa aina yksi tavu).
-    RLEsilm1:
-        ldy rle_data, x   ; lohkon tyyppi
-        beq LoppumerkkiHavaittu2
-        bpl Pakattu
-            ; Pakkaamaton lohko
-            RLEsilm2:
-                inx
-                lda rle_data, x
-                sta ppu_data
-                dey
-                bmi RLEsilm2
-            jmp LohkoKopioitu
-        Pakattu:
-            inx
-            lda rle_data, x
-            RLEsilm3:
-                sta ppu_data
-                dey
-                bpl RLEsilm3
-        LohkoKopioitu:
-        inx
-        bne RLEsilm1
-    LoppumerkkiHavaittu2:
+    ; print run length encoded data in table rle_data starting from offset X
+    ; compressed block:
+    ;   - length minus one; length is 2-128
+    ;   - byte to repeat
+    ; uncompressed block:
+    ;   - $80 | (length - 1); length is 1-128
+    ;   - as many bytes as length is
+    ; terminator: $00
+rle_block:
+    ldy rle_data, x   ; block type
+    beq rle_data_end  ; terminator
+    bpl +
+    ; uncompressed block
+-   inx
+    lda rle_data, x
+    sta ppu_data
+    dey
+    bmi -
+    jmp block_end
++   ; compressed block
+    inx
+    lda rle_data, x
+-   sta ppu_data
+    dey
+    bpl -
+block_end:
+    inx
+    bne rle_block
+rle_data_end:
     rts
 
-LueOhjain:
-    ; Luetaan peliohjaimen tila A:han ja X:aan.
-    ; Bitit: A, B, select, start, yla, ala, vasen, oikea.
+read_joypad:
+    ; return in A and X
     ldx #1
     stx joypad1
     dex
     stx joypad1
     ldy #8
-    OhjainLukuSilm:
-        lda joypad1
-        ror
-        txa
-        rol
-        tax
-        dey
-        bne OhjainLukuSilm
+-   lda joypad1
+    ror
+    txa
+    rol
+    tax
+    dey
+    bne -
     rts
 
-AsetaVirtuNappTila:
-    ; Kirjoittaa Attribute Tableen virtuaalinappaimiston kohdalle A:n arvoa
-    ldx #$23
+set_virtual_keyboard_status:
+    ; write A to attribute table 0 on virtual keyboard 12 times
+    ldx #>(vram_attribute_table0 + 5 * 8 + 2)
     stx ppu_addr
-    ldx #$EA
+    ldx #<(vram_attribute_table0 + 5 * 8 + 2)
     stx ppu_addr
     ldx #12
-    VirtuNappSilm:
-        sta ppu_data
-        dex
-        bne VirtuNappSilm
+-   sta ppu_data
+    dex
+    bne -
     rts
 
 ; --------------------------------------------------------------------------------------------------
 ; Tables
 
-; Brainfuck-kaskyt; milla napilla ne kirjoitetaan; kaskyt suorittavien koodinpatkien osoitteet
+; Brainfuck instructions
 instructions:
     db "+"
     db "-"
@@ -878,7 +844,8 @@ instructions:
     db ","
     db $8a  ; double plus
     db $8b  ; double minus
-    db " "  ; ??
+    db " "  ; space in edit mode, "end program" in run mode
+; buttons in edit mode
 instruction_buttons:
     db button_up
     db button_down
@@ -891,30 +858,25 @@ instruction_buttons:
     db button_start | button_up
     db button_start | button_down
     db button_start | button_right
+; offsets for run mode
 instruction_offsets:
-    db Plus - AjoTila
-    db Miinus - AjoTila
-    db Vasen - AjoTila
-    db Oikea - AjoTila
-    db Alkusulku - AjoTila
-    db Loppusulku - AjoTila
-    db Piste - AjoTila
-    db Pilkku - AjoTila
-    db KaksiPlus - AjoTila
-    db KaksiMiinus - AjoTila
-    db PoistuOhjelmasta - AjoTila   ; means "_" instead of space
+    db plus            - run_mode
+    db minus           - run_mode
+    db left            - run_mode
+    db right           - run_mode
+    db opening_bracket - run_mode
+    db closing_bracket - run_mode
+    db period          - run_mode
+    db comma           - run_mode
+    db double_plus     - run_mode
+    db double_minus    - run_mode
+    db end_program     - run_mode
 
-; run length encoded name table data
-; compressed block:
-;   - length minus one
-;   - byte to repeat
-; uncompressed block:
-;   - $80 | (length - 1)
-;   - as many bytes as length is
 rle_data:
+    ; run length encoded name table data (see print_rle_data for format)
 
-    ; edit screen before the Brainfuck code
 rle_data_editor_top:
+    ; edit screen before the Brainfuck code
     db 102 - 1, " "
     db $80 | (1 - 1), $82
     db 17 - 1, $80
@@ -945,15 +907,15 @@ rle_data_editor_top:
     db 32 - 1, $80
     db terminator
 
-    ; edit screen after the Brainfuck code
 rle_data_editor_bottom:
+    ; edit screen after the Brainfuck code
     db 32 - 1, $80
     db 128 - 1, " "
     db 32 - 1, " "
     db terminator
 
-    ; run screen before the text "Running"
 rle_data_code_execution_top:
+    ; run screen before the text "Running"
     db 128 - 1, " "
     db 32 - 1, " "
     db $80 | (7 - 1), "Output:"
@@ -983,7 +945,7 @@ string_finished:
     db terminator
 
 initial_sprite_data:
-    db $ff, $00, %00000001, $ff   ; valittu merkki mustana
+    db $ff, $00, %00000001, $ff   ; selected character in black
     db $ff, $8c, %00000000, $ff   ; a white block
 
 ; --------------------------------------------------------------------------------------------------
