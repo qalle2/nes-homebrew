@@ -11,6 +11,7 @@ Thanks to [pdroms.de](https://pdroms.de) for archiving some of these programs.
 * Either run the program's batch file (only works on Windows) or assemble manually: `asm6f file.asm file.nes`
 
 ## The programs
+Assembled programs are in `binaries.zip`.
 
 ### 24balls.asm
 Shows 24 bouncing balls.
