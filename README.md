@@ -39,7 +39,7 @@ Prints *Hello, World!*. Only tested on [FCEUX](http://www.fceux.com).
 ![hello.asm](hello.png)
 
 ### paint.asm
-KHS-NES-Paint, a paint program. 64&times;48 "pixels", 4 colors, palette editor, 1&times;1-pixel or 2&times;2-pixel brush. Source code comments are still mostly in Finnish.
+KHS-NES-Paint, a paint program. 64&times;48 "pixels", 4 colors, palette editor, 1&times;1-pixel or 2&times;2-pixel brush.
 
 ![paint.asm](paint.png)
 
