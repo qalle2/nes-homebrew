@@ -9,20 +9,20 @@
 
 ; CPU memory space
 
-numbers            equ $00  ; ajan numerot (7 tavua)
-hour_tens          equ $00  ; tunnin/minuutin/sekunnin kymmenet/ykköset
+digits             equ $00  ; digits of time (6 bytes)
+hour_tens          equ $00
 hour_ones          equ $01
 minute_tens        equ $02
 minute_ones        equ $03
 second_tens        equ $04
 second_ones        equ $05
 frame              equ $06
-mode               equ $07  ; ohjelman tila (0 = ajan asetus, 1 = kello käynnissä)
-KursSij            equ $08  ; kursorin sijainti ajanasetustilassa
-joypad_status      equ $09  ; peliohjaimen tila
-prev_joypad_status equ $0a  ; edellinen peliohjaimen tila
-SamSegNak          equ $0b  ; näytetäänkö sammuksissa olevat segmentit (0 = ei, 1 = kyllä)
-pal_timing         equ $0c  ; 0 = NTSC-kone, 1 = PAL-kone
+mode               equ $07  ; 0 = set time, 1 = clock running
+cursor_pos         equ $08  ; cursor position in "set time" mode
+joypad_status      equ $09
+prev_joypad_status equ $0a  ; previous joypad status
+show_inactive      equ $0b  ; show inactive segments? (0 = no, 1 = yes)
+timing             equ $0c  ; 0 = NTSC, 1 = PAL
 temp               equ $0d
 
 ppu_ctrl   equ $2000
@@ -41,7 +41,10 @@ vram_palette     equ $3f00
 ; non-address constants
 
 black  equ $0f
+teal   equ $0c
 yellow equ $28
+
+digit_count equ 6
 
 ; --------------------------------------------------------------------------------------------------
 ; iNES header
@@ -54,7 +57,7 @@ yellow equ $28
 ; --------------------------------------------------------------------------------------------------
 ; Main program
 
-    org $C000
+    org $c000
 reset:
 
     lda #%00000000
@@ -137,9 +140,9 @@ reset:
     sta $4015
 
     ldx #0
-    jsr NaytaNuoli
-    jsr TulostaNTSCPAL
-    jsr PaivitaNumerot
+    jsr print_cursor
+    jsr print_ntsc_pal_text
+    jsr print_digits
 
     bit ppu_status
 -   lda ppu_status
@@ -159,317 +162,321 @@ reset:
 ; Non-maskable interrupt routine
 
 nmi:
-    ; TODO: clean up & translate the rest of the program
-
     lda mode
-    beq AjanSaato
-    jmp KelloKaynnissa
+    beq adjustment_mode
+    jmp run_mode
 
-    AjanSaato:
-        ; Luetaan peliohjaimen tila A:han ja X:ään.
-        ; Bitit: A, B, select, start, ylä, ala, vasen, oikea.
-        ldx #1
-        stx joypad1
-        dex
-        stx joypad1
-        ldy #8
-        OhjainLukuSilm:
-            lda joypad1
-            ror
-            txa
-            rol
-            tax
-            dey
-            bne OhjainLukuSilm
-        sta joypad_status
+adjustment_mode:
+    ; joypad 1 status -> A, X (bits: A, B, select, start, up, down, left, right)
+    ldx #1
+    stx joypad1
+    dex
+    stx joypad1
+    ldy #8
+-   lda joypad1
+    ror
+    txa
+    rol
+    tax
+    dey
+    bne -
+    sta joypad_status
 
-        ; Reagoidaan nappeihin, jos edellisellä framella ei ole painettu mitään
+    ; ignore buttons if something was pressed on last frame
+    ldx prev_joypad_status
+    beq +
+    jmp button_read_done
 
-        ldx prev_joypad_status
-        beq Jatka1
-        jmp Pois
-        Jatka1:
+    ; react to buttons
++   lsr
+    bcs cursor_right
+    lsr
+    bcs cursor_left
+    lsr
+    bcs decrement_digit
+    lsr
+    bcs increment_digit
+    lsr
+    bcs start_clock
+    lsr
+    lsr
+    bcc +
+    jmp toggle_inactive_segment_color
++   lsr
+    bcc +
+    jmp toggle_ntsc_pal
++   jmp button_read_done
 
-        lsr
-        bcs Oikea
-        lsr
-        bcs Vasen
-        lsr
-        bcs Ala
-        lsr
-        bcs Yla
-        lsr
-        bcs Start
-        lsr
-        lsr
-        bcc EiBnappi
-            jmp Bnappi
-            EiBnappi:
-        lsr
-        bcc EiAnappi
-            jmp Anappi
-            EiAnappi:
-        jmp Pois
+cursor_right:
+    ldx cursor_pos
+    jsr hide_cursor
+    inx
+    cpx #digit_count
+    bne +
+    ldx #0
++   stx cursor_pos
+    jsr print_cursor
+    jmp button_read_done
 
-        Oikea:
-            ldx KursSij
-            jsr PiilotaNuoli
-            inx
-            cpx #6
-            bne EiNollata1
-                ldx #0
-                EiNollata1:
-            stx KursSij
-            jsr NaytaNuoli
-            jmp Pois
-        Vasen:
-            ldx KursSij
-            jsr PiilotaNuoli
-            dex
-            bpl EiNollata2
-                ldx #5
-                EiNollata2:
-            stx KursSij
-            jsr NaytaNuoli
-            jmp Pois
-        Ala:
-            ldx KursSij
-            lda NumYlarajat, x
-            sta temp
-            ldy numbers, x
-            dey
-            bpl EiNollata3
-                ldy temp
-                dey
-                EiNollata3:
-            sty numbers, x
-            jmp Pois
-        Yla:
-            ldx KursSij
-            lda NumYlarajat, x
-            sta temp
-            ldy numbers, x
-            iny
-            cpy temp
-            bne EiNollata4
-                ldy #0
-                EiNollata4:
-            sty numbers, x
-            jmp Pois
-        Start:
-            ; Käynnistetään kello, jos tunti on enintään 23
-            lda hour_tens
-            cmp #2
-            bcc Jatka2
-            lda hour_ones
-            cmp #4
-            bcc Jatka2
-                ; Ääniefekti
-                lda #%10011111
-                sta $4000
-                lda #%00001000
-                sta $4001
-                lda #%11111111
-                sta $4002
-                lda #%10111111
-                sta $4003
-                jmp Pois
-            Jatka2:
-                ; NTSC-/PAL-teksti pois
-                lda #$21
-                sta ppu_addr
-                lda #$46
-                sta ppu_addr
-                lda #$00
-                ldx #4
-                TyhjSilm2:
-                    sta ppu_data
-                    dex
-                    bne TyhjSilm2
-                ldx KursSij
-                jsr PiilotaNuoli
-                inc mode
-                jmp Pois
-        Bnappi:
-            ; Sammuksissa olevat segmentit piiloon/näkyviin
-            lda SamSegNak
-            eor #%00000001
-            sta SamSegNak
-            tax
-            lda #$3F
-            sta ppu_addr
-            lda #$01
-            sta ppu_addr
-            lda SegVarit, x
-            sta ppu_data
-            jmp Pois
-        Anappi:
-            ; NTSC-/PAL-tila
-            lda pal_timing
-            eor #%00000001
-            sta pal_timing
-            jsr TulostaNTSCPAL
-        Pois:
-        lda joypad_status
-        sta prev_joypad_status
-        jsr PaivitaNumerot
-        rti
+cursor_left:
+    ldx cursor_pos
+    jsr hide_cursor
+    dex
+    bpl +
+    ldx #(digit_count - 1)
++   stx cursor_pos
+    jsr print_cursor
+    jmp button_read_done
 
-    KelloKaynnissa:
-        jsr PaivitaNumerot
+decrement_digit:
+    ldx cursor_pos
+    lda digit_max_values_plus1, x
+    sta temp
+    ldy digits, x
+    dey
+    bpl +
+    ldy temp
+    dey
++   sty digits, x
+    jmp button_read_done
 
-        ; Määritetään sekunnin pituus frameina.
-        ; Tarkat taajuudet NESDev Wikistä: NTSC 60,0988 Hz; PAL 50,007 Hz.
-        ; Tässä ohjelmassa:
-        ; NTSC: 60 framea, paitsi joka 10.  sekunti 61 framea (= 60,1 framea/s, virhe 1/50000)
-        ; PAL:  50 framea, paitsi joka 120. sekunti 51 framea (= 50,0083 framea/s, virhe 1/38000)
-        db $ad  ; LDA absolute (forgot to use zero page addressing mode here)
-        dw pal_timing
-        bne PAL
-            ; NTSC
-            lda #60
-            sta temp
-            lda second_ones
-            bne SekPituusOK
-                inc temp
-                jmp SekPituusOK
-        PAL:
-            lda #50
-            sta temp
-            lda minute_ones
-            and #%00000001
-            ora second_tens
-            ora second_ones
-            bne SekPituusOK
-                inc temp
-        SekPituusOK:
+increment_digit:
+    ldx cursor_pos
+    lda digit_max_values_plus1, x
+    sta temp
+    ldy digits, x
+    iny
+    cpy temp
+    bne +
+    ldy #0
++   sty digits, x
+    jmp button_read_done
 
-        ; Suurennetaan ajan numeroita
-        inc frame
-        lda frame
-        cmp temp
-        bne EiNollata5
-            lda #0
-            sta frame
-            ldx second_ones
-            lda SeurNum10, x
-            sta second_ones
-            bne EiNollata5
-                ldx second_tens
-                lda SeurNum6, x
-                sta second_tens
-                bne EiNollata5
-                    ldx minute_ones
-                    lda SeurNum10, x
-                    sta minute_ones
-                    bne EiNollata5
-                        ldx minute_tens
-                        lda SeurNum6, x
-                        sta minute_tens
-                        bne EiNollata5
-                            ldx hour_ones
-                            lda hour_tens
-                            cmp #2
-                            beq Kaksi
-                                lda SeurNum10, x
-                                jmp Tehty
-                            Kaksi:
-                                lda SeurNum4, x
-                                Tehty:
-                            sta hour_ones
-                            bne EiNollata5
-                                ldx hour_tens
-                                lda SeurNum3, x
-                                sta hour_tens
-                                EiNollata5:
+start_clock:
+    ; start clock if hour is 23 or smaller
+    lda hour_tens
+    cmp #2
+    bcc +
+    lda hour_ones
+    cmp #4
+    bcc +
+    ; error sound effect
+    lda #%10011111
+    sta $4000
+    lda #%00001000
+    sta $4001
+    lda #%11111111
+    sta $4002
+    lda #%10111111
+    sta $4003
+    jmp button_read_done
++   ; hide NTSC/PAL text
+    lda #>(vram_name_table0 + 10 * 32 + 6)
+    sta ppu_addr
+    lda #<(vram_name_table0 + 10 * 32 + 6)
+    sta ppu_addr
+    lda #$00
+    ldx #4
+-   sta ppu_data
+    dex
+    bne -
+    ; hide cursor
+    ldx cursor_pos
+    jsr hide_cursor
+    ; switch to "clock running" mode
+    inc mode
+    jmp button_read_done
+
+toggle_inactive_segment_color:
+    ; toggle color of inactive segments
+    lda show_inactive
+    eor #%00000001
+    sta show_inactive
+    tax
+    lda #>(vram_palette + 1)
+    sta ppu_addr
+    lda #<(vram_palette + 1)
+    sta ppu_addr
+    lda inactive_segment_colors, x
+    sta ppu_data
+    jmp button_read_done
+
+toggle_ntsc_pal:
+    ; toggle between NTSC and PAL timing
+    lda timing
+    eor #%00000001
+    sta timing
+    jsr print_ntsc_pal_text
+
+button_read_done:
+    lda joypad_status
+    sta prev_joypad_status
+    jsr print_digits
+    rti
+
+run_mode:
+    jsr print_digits
+
+    ; length of second in frames -> temp
+
+    db $ad  ; LDA absolute (forgot to use zero page addressing mode here)
+    dw timing  ; 0 = NTSC, 1 = PAL
+    bne pal_timing
+    ; NTSC timing: 60 frames/s, except 61 frames every 10 seconds (= 60.1 frames/s)
+    ; (should be 60.0988 frames/s according to NESDev wiki)
+    lda #60
+    sta temp
+    lda second_ones
+    bne +
+    inc temp
+    jmp +
+pal_timing:
+    ; PAL timing: 50 frames/s, except 51 frames every 120 seconds (= 50.0083 frames/s)
+    ; (should be 50.007 frames/s according to NESDev wiki)
+    lda #50
+    sta temp
+    lda minute_ones
+    and #%00000001
+    ora second_tens
+    ora second_ones
+    bne +
+    inc temp
++
+
+    ; increment digits
+
+    inc frame
+    lda frame
+    cmp temp
+    bne digit_increment_done
+
+    lda #0
+    sta frame
+
+    ldx second_ones
+    lda plus1_modulo10, x
+    sta second_ones
+    bne digit_increment_done
+
+    ldx second_tens
+    lda plus1_modulo6, x
+    sta second_tens
+    bne digit_increment_done
+
+    ldx minute_ones
+    lda plus1_modulo10, x
+    sta minute_ones
+    bne digit_increment_done
+
+    ldx minute_tens
+    lda plus1_modulo6, x
+    sta minute_tens
+    bne digit_increment_done
+
+    ldx hour_ones
+    lda hour_tens
+    cmp #2
+    beq +
+    lda plus1_modulo10, x
+    jmp ++
++   lda plus1_modulo4, x
+++  sta hour_ones
+    bne digit_increment_done
+
+    ldx hour_tens
+    lda plus1_modulo3, x
+    sta hour_tens
+
+digit_increment_done:
     rti
 
 ; --------------------------------------------------------------------------------------------------
 ; Subroutines
 
-NaytaNuoli:
-    lda #$22
+print_cursor:
+    ; print cursor below digit specified by X (0-5)
+    lda #>(vram_name_table0 + 16 * 32)
     sta ppu_addr
-    lda NuoliOs, x
+    lda cursor_addresses_low, x
     sta ppu_addr
-    lda #$05
+    lda #$05      ; left half of cursor
     sta ppu_data
-    lda #$06
+    lda #$06      ; right half of cursor
     sta ppu_data
     rts
 
-PiilotaNuoli:
-    lda #$22
+hide_cursor:
+    ; hide cursor from below digit specified by X (0-5)
+    lda #>(vram_name_table0 + 16 * 32)
     sta ppu_addr
-    lda NuoliOs, x
+    lda cursor_addresses_low, x
     sta ppu_addr
     lda #$00
     sta ppu_data
     sta ppu_data
     rts
 
-TulostaNTSCPAL:
-    lda pal_timing
+print_ntsc_pal_text:
+    ; print "NTSC" or "PAL "
+    lda timing
     asl
     asl
     tax
-    lda #$21
+    lda #>(vram_name_table0 + 10 * 32 + 6)
     sta ppu_addr
-    lda #$46
+    lda #<(vram_name_table0 + 10 * 32 + 6)
     sta ppu_addr
     ldy #4
-    NTSCPALsilm:
-        lda NTSCPALteksti, x
-        sta ppu_data
-        inx
-        dey
-        bne NTSCPALsilm
+-   lda ntsc_pal_text, x
+    sta ppu_data
+    inx
+    dey
+    bne -
     rts
 
-PaivitaNumerot:
-    ; Päivitetään numerot merkkipari (24 kpl) kerrallaan, nollataan PPU-osoite ja asetetaan
-    ; vieritysarvo
-
-    ldy #23
-    SegSilm:
-        lda #$21
-        sta ppu_addr
-        lda SegOs, y
-        sta ppu_addr
-
-        ; Monennessako numerossa ollaan
-        tya
-        lsr
-        lsr
-        tax
-
-        ; Numeron arvon sijainti SegTilat-taulukossa
-        lda numbers, x
-        rept 3
-            asl
-        endr
-        sta temp
-
-        ; Tarkka sijainti SegTilat-taulukossa
-        tya
-        and #%00000011
+print_digits:
+    ; print the digit segments (2*1 tiles per round; each digit is 2*4 tiles)
+    ldy #(digit_count * 4 - 1)  ; counts to 0
+-   lda #>(vram_name_table0 + 8 * 32)
+    sta ppu_addr
+    lda segment_addresses_low, y
+    sta ppu_addr
+    ; which digit (0-5) -> X
+    tya
+    lsr
+    lsr
+    tax
+    ; digit offset in segment data -> temp
+    lda digits, x
+    rept 3
         asl
-        adc temp
-        tax
+    endr
+    sta temp
+    ; digit row offset in segment data -> X
+    tya
+    and #%00000011
+    asl
+    adc temp
+    tax
+    ; print digit row
+    lda segment_tiles + 0, x
+    sta ppu_data
+    lda segment_tiles + 1, x
+    sta ppu_data
+    ; next digit row
+    dey
+    bpl -
 
-        lda SegTilat, x
-        sta ppu_data
-        lda SegTilat+1, x
-        sta ppu_data
-
-        dey
-        bpl SegSilm
-
+    ; reset VRAM address
     lda #$00
     sta ppu_addr
     sta ppu_addr
+
+    ; horizontal scroll
     lda #256-4
     sta ppu_scroll
+
+    ; vertical scroll
     lda #256-8
     sta ppu_scroll
     rts
@@ -482,45 +489,74 @@ colon_addresses_low:
     db 5 * 32 + 18
     db 6 * 32 + 11
     db 6 * 32 + 18
-NuoliOs:
-    db $26, $29, $2d, $30, $34, $37
-NTSCPALteksti:
+cursor_addresses_low:
+    db 32 + 6
+    db 32 + 9
+    db 32 + 13
+    db 32 + 16
+    db 32 + 20
+    db 32 + 23
+ntsc_pal_text:
     hex 07 08 09 0a  ; "NTSC"
     hex 0b 0c 0d 00  ; "PAL "
 
-NumYlarajat:
+digit_max_values_plus1:
     db 3, 10, 6, 10, 6, 10
-SeurNum3:
+plus1_modulo3:
     db 1, 2, 0
-SeurNum4:
+plus1_modulo4:
     db 1, 2, 3, 0
-SeurNum6:
+plus1_modulo6:
     db 1, 2, 3, 4, 5, 0
-SeurNum10:
+plus1_modulo10:
     db 1, 2, 3, 4, 5, 6, 7, 8, 9, 0
 
-SegVarit:
-    db $0f, $0c
+inactive_segment_colors:
+    db black, teal
 
-SegOs:
-    db $86,$a6,$c6,$e6   ; tuntien kymmenet
-    db $89,$a9,$c9,$e9   ; tuntien ykköset
-    db $8d,$ad,$cd,$ed   ; minuuttien kymmenet
-    db $90,$b0,$d0,$f0   ; minuuttien ykköset
-    db $94,$b4,$d4,$f4   ; sekuntien kymmenet
-    db $97,$b7,$d7,$f7   ; sekuntien ykköset
+segment_addresses_low:
+    ; tens of hour
+    db 4 * 32 + 6
+    db 5 * 32 + 6
+    db 6 * 32 + 6
+    db 7 * 32 + 6
+    ; ones of hour
+    db 4 * 32 + 9
+    db 5 * 32 + 9
+    db 6 * 32 + 9
+    db 7 * 32 + 9
+    ; tens of minute
+    db 4 * 32 + 13
+    db 5 * 32 + 13
+    db 6 * 32 + 13
+    db 7 * 32 + 13
+    ; ones of minute
+    db 4 * 32 + 16
+    db 5 * 32 + 16
+    db 6 * 32 + 16
+    db 7 * 32 + 16
+    ; tens of second
+    db 4 * 32 + 20
+    db 5 * 32 + 20
+    db 6 * 32 + 20
+    db 7 * 32 + 20
+    ; ones of second
+    db 4 * 32 + 23
+    db 5 * 32 + 23
+    db 6 * 32 + 23
+    db 7 * 32 + 23
 
-SegTilat:
-    hex 13 17 1a 1d 22 25 2b 2f   ; "0"
-    hex 10 15 18 1d 20 25 28 2d   ; "1"
-    hex 11 17 19 1f 23 26 2b 2e   ; "2"
-    hex 11 17 19 1f 21 27 29 2f   ; "3"
-    hex 12 15 1b 1f 21 27 28 2d   ; "4"
-    hex 13 16 1b 1e 21 27 29 2f   ; "5"
-    hex 13 16 1b 1e 23 27 2b 2f   ; "6"
-    hex 13 17 1a 1d 20 25 28 2d   ; "7"
-    hex 13 17 1b 1f 23 27 2b 2f   ; "8"
-    hex 13 17 1b 1f 21 27 29 2f   ; "9"
+segment_tiles:
+    hex 13 17  1a 1d  22 25  2b 2f  ; "0"
+    hex 10 15  18 1d  20 25  28 2d  ; "1"
+    hex 11 17  19 1f  23 26  2b 2e  ; "2"
+    hex 11 17  19 1f  21 27  29 2f  ; "3"
+    hex 12 15  1b 1f  21 27  28 2d  ; "4"
+    hex 13 16  1b 1e  21 27  29 2f  ; "5"
+    hex 13 16  1b 1e  23 27  2b 2f  ; "6"
+    hex 13 17  1a 1d  20 25  28 2d  ; "7"
+    hex 13 17  1b 1f  23 27  2b 2f  ; "8"
+    hex 13 17  1b 1f  21 27  29 2f  ; "9"
 
 chr_data:
     ; characters $00-$0d
@@ -541,38 +577,46 @@ chr_data:
 
     ; characters $10-$3f: segments
     pad chr_data + $10 * 16, $00
-    hex 0f 1f 1f 6f f0 f0 f0 f0  00 00 00 00 00 00 00 00
-    hex 00 00 00 60 f0 f0 f0 f0  0f 1f 1f 0f 00 00 00 00
-    hex 0f 1f 1f 0f 00 00 00 00  00 00 00 60 f0 f0 f0 f0
-    hex 00 00 00 00 00 00 00 00  0f 1f 1f 6f f0 f0 f0 f0
-    hex f0 f8 f8 f6 0f 0f 0f 0f  00 00 00 00 00 00 00 00
-    hex f0 f8 f8 f0 00 00 00 00  00 00 00 06 0f 0f 0f 0f
-    hex 00 00 00 06 0f 0f 0f 0f  f0 f8 f8 f0 00 00 00 00
-    hex 00 00 00 00 00 00 00 00  f0 f8 f8 f6 0f 0f 0f 0f
-    hex f0 f0 f0 f0 f0 f0 6f 1f  00 00 00 00 00 00 00 00
-    hex f0 f0 f0 f0 f0 f0 60 00  00 00 00 00 00 00 0f 1f
-    hex 00 00 00 00 00 00 0f 1f  f0 f0 f0 f0 f0 f0 60 00
-    hex 00 00 00 00 00 00 00 00  f0 f0 f0 f0 f0 f0 6f 1f
-    hex 0f 0f 0f 0f 0f 0f f6 f8  00 00 00 00 00 00 00 00
-    hex 00 00 00 00 00 00 f0 f8  0f 0f 0f 0f 0f 0f 06 00
-    hex 0f 0f 0f 0f 0f 0f 06 00  00 00 00 00 00 00 f0 f8
-    hex 00 00 00 00 00 00 00 00  0f 0f 0f 0f 0f 0f f6 f8
-    hex 1f 6f f0 f0 f0 f0 f0 f0  00 00 00 00 00 00 00 00
-    hex 00 60 f0 f0 f0 f0 f0 f0  1f 0f 00 00 00 00 00 00
-    hex 1f 0f 00 00 00 00 00 00  00 60 f0 f0 f0 f0 f0 f0
-    hex 00 00 00 00 00 00 00 00  1f 6f f0 f0 f0 f0 f0 f0
-    hex f8 f6 0f 0f 0f 0f 0f 0f  00 00 00 00 00 00 00 00
-    hex f8 f0 00 00 00 00 00 00  00 06 0f 0f 0f 0f 0f 0f
-    hex 00 06 0f 0f 0f 0f 0f 0f  f8 f0 00 00 00 00 00 00
-    hex 00 00 00 00 00 00 00 00  f8 f6 0f 0f 0f 0f 0f 0f
-    hex f0 f0 f0 f0 6f 1f 1f 0f  00 00 00 00 00 00 00 00
-    hex f0 f0 f0 f0 60 00 00 00  00 00 00 00 0f 1f 1f 0f
-    hex 00 00 00 00 0f 1f 1f 0f  f0 f0 f0 f0 60 00 00 00
-    hex 00 00 00 00 00 00 00 00  f0 f0 f0 f0 6f 1f 1f 0f
-    hex 0f 0f 0f 0f f6 f8 f8 f0  00 00 00 00 00 00 00 00
-    hex 00 00 00 00 f0 f8 f8 f0  0f 0f 0f 0f 06 00 00 00
-    hex 0f 0f 0f 0f 06 00 00 00  00 00 00 00 f0 f8 f8 f0
-    hex 00 00 00 00 00 00 00 00  0f 0f 0f 0f f6 f8 f8 f0
+    ; top row of digit - left
+    hex 0f 1f 1f 6f f0 f0 f0 f0  00 00 00 00 00 00 00 00  ; $10: down off, right off
+    hex 00 00 00 60 f0 f0 f0 f0  0f 1f 1f 0f 00 00 00 00  ; $11: down off, right on
+    hex 0f 1f 1f 0f 00 00 00 00  00 00 00 60 f0 f0 f0 f0  ; $12: down on,  right off
+    hex 00 00 00 00 00 00 00 00  0f 1f 1f 6f f0 f0 f0 f0  ; $13: down on,  right on
+    ; top row of digit - right
+    hex f0 f8 f8 f6 0f 0f 0f 0f  00 00 00 00 00 00 00 00  ; $14: left off, down off
+    hex f0 f8 f8 f0 00 00 00 00  00 00 00 06 0f 0f 0f 0f  ; $15: left off, down on
+    hex 00 00 00 06 0f 0f 0f 0f  f0 f8 f8 f0 00 00 00 00  ; $16: left on,  down off
+    hex 00 00 00 00 00 00 00 00  f0 f8 f8 f6 0f 0f 0f 0f  ; $17: left on,  down on
+    ; second row of digit - left
+    hex f0 f0 f0 f0 f0 f0 6f 1f  00 00 00 00 00 00 00 00  ; $18: up off, right off
+    hex f0 f0 f0 f0 f0 f0 60 00  00 00 00 00 00 00 0f 1f  ; $19: up off, right on
+    hex 00 00 00 00 00 00 0f 1f  f0 f0 f0 f0 f0 f0 60 00  ; $1a: up on,  right off
+    hex 00 00 00 00 00 00 00 00  f0 f0 f0 f0 f0 f0 6f 1f  ; $1b: up on,  right on
+    ; second row of digit - right
+    hex 0f 0f 0f 0f 0f 0f f6 f8  00 00 00 00 00 00 00 00  ; $1c: left off, up off
+    hex 00 00 00 00 00 00 f0 f8  0f 0f 0f 0f 0f 0f 06 00  ; $1d: left off, up on
+    hex 0f 0f 0f 0f 0f 0f 06 00  00 00 00 00 00 00 f0 f8  ; $1e: left on,  up off
+    hex 00 00 00 00 00 00 00 00  0f 0f 0f 0f 0f 0f f6 f8  ; $1f: left on,  up on
+    ; third row of digit - left
+    hex 1f 6f f0 f0 f0 f0 f0 f0  00 00 00 00 00 00 00 00  ; $20: down off, right off
+    hex 00 60 f0 f0 f0 f0 f0 f0  1f 0f 00 00 00 00 00 00  ; $21: down off, right on
+    hex 1f 0f 00 00 00 00 00 00  00 60 f0 f0 f0 f0 f0 f0  ; $22: down on,  right off
+    hex 00 00 00 00 00 00 00 00  1f 6f f0 f0 f0 f0 f0 f0  ; $23: down on,  right on
+    ; third row of digit - right
+    hex f8 f6 0f 0f 0f 0f 0f 0f  00 00 00 00 00 00 00 00  ; $24: left off, down off
+    hex f8 f0 00 00 00 00 00 00  00 06 0f 0f 0f 0f 0f 0f  ; $25: left off, down on
+    hex 00 06 0f 0f 0f 0f 0f 0f  f8 f0 00 00 00 00 00 00  ; $26: left on,  down off
+    hex 00 00 00 00 00 00 00 00  f8 f6 0f 0f 0f 0f 0f 0f  ; $27: left on,  down on
+    ; bottom row of digit - left
+    hex f0 f0 f0 f0 6f 1f 1f 0f  00 00 00 00 00 00 00 00  ; $28: up off, right off
+    hex f0 f0 f0 f0 60 00 00 00  00 00 00 00 0f 1f 1f 0f  ; $29: up off, right on
+    hex 00 00 00 00 0f 1f 1f 0f  f0 f0 f0 f0 60 00 00 00  ; $2a: up on,  right off
+    hex 00 00 00 00 00 00 00 00  f0 f0 f0 f0 6f 1f 1f 0f  ; $2b: up on,  right on
+    ; bottom row of digit - right
+    hex 0f 0f 0f 0f f6 f8 f8 f0  00 00 00 00 00 00 00 00  ; $2c: left off, up off
+    hex 00 00 00 00 f0 f8 f8 f0  0f 0f 0f 0f 06 00 00 00  ; $2d: left off, up on
+    hex 0f 0f 0f 0f 06 00 00 00  00 00 00 00 f0 f8 f8 f0  ; $2e: left on,  up off
+    hex 00 00 00 00 00 00 00 00  0f 0f 0f 0f f6 f8 f8 f0  ; $2f: left on,  up on
 
 ; --------------------------------------------------------------------------------------------------
 ; Interrupt vectors
