@@ -13,38 +13,42 @@ Thanks to [pdroms.de](https://pdroms.de) for archiving some of these programs.
 ## The programs
 Assembled programs are in `binaries.zip`.
 
-### 24balls.asm
+### 24 Balls
 Shows 24 bouncing balls.
+
+Files:
+* `24balls.asm`: old version (assembled file is identical to the version I created in early 2010s)
+* `24balls-new.asm`: new version (uses about 900 bytes of PRG ROM)
 
 ![24balls.asm](24balls.png)
 
-### brainfuck.asm
-KHS-NES-Brainfuck, a Brainfuck interpreter. The programs can use 256 bytes of RAM. Spaces are for readability only.
-
-![brainfuck.asm](brainfuck.png)
-
-### clock.asm
+### Clock
 A 24-hour 7-segment clock. NTSC/PAL support.
 
 ![clock.asm](clock.png)
 
-### colorsquares.asm
+### Color Squares
 Prints colored squares. On each frame, two adjacent squares trade places.
 
 ![colorsquares.asm](colorsquares.png)
 
-### gradient.asm
+### Gradient Demo
 Prints an animated gradient and moving text. Warning: you may get a seizure.
 
 ![gradient.asm](gradient.png)
 
-### hello.asm
+### Hello World
 Prints *Hello, World!*. Only tested on [FCEUX](http://www.fceux.com).
 
 ![hello.asm](hello.png)
 
-### paint.asm
-KHS-NES-Paint, a paint program. 64&times;48 "pixels", 4 colors, palette editor, 1&times;1-pixel or 2&times;2-pixel brush.
+### KHS-NES-Brainfuck
+A Brainfuck interpreter. The programs can use 256 bytes of RAM. Spaces are for readability only.
+
+![brainfuck.asm](brainfuck.png)
+
+### KHS-NES-Paint
+A paint program. 64&times;48 "pixels", 4 colors, palette editor, 1&times;1-pixel or 2&times;2-pixel brush.
 
 ![paint.asm](paint.png)
 
