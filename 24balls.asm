@@ -17,7 +17,11 @@
 ; --------------------------------------------------------------------------------------------------
 ; Constants
 
-; memory-mapped registers
+; CPU memory space
+
+sprite_page equ $0000
+timer       equ $0200
+
 ppu_ctrl   equ $2000
 ppu_mask   equ $2001
 ppu_status equ $2002
@@ -25,15 +29,13 @@ ppu_addr   equ $2006
 ppu_data   equ $2007
 oam_dma    equ $4014
 
-; VRAM
+; PPU memory space
+
 vram_name_table0 equ $2000
 vram_palette     equ $3f00
 
-; RAM
-sprite_page equ $0000
-timer       equ $0200
-
 ; non-address constants
+
 ball_count equ 24
 
 ; --------------------------------------------------------------------------------------------------
