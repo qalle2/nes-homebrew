@@ -132,7 +132,7 @@ reset:
     cpx #32
     bne -
 
-    ; upload CHR RAM data (256 bytes = 16 tiles)
+    ; copy CHR data to CHR RAM (16 tiles)
     jsr reset_vram_address
     ldx #0
 -   lda chr_data, x
