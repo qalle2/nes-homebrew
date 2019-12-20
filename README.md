@@ -23,6 +23,11 @@ KHS-NES-Brainfuck, a Brainfuck interpreter. The programs can use 256 bytes of RA
 
 ![brainfuck.asm](brainfuck.png)
 
+### clock.asm
+A 24-hour 7-segment clock. NTSC/PAL support.
+
+![clock.asm](clock.png)
+
 ### colorsquares.asm
 Prints colored squares. On each frame, two adjacent squares trade places.
 
