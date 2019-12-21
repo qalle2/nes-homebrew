@@ -1,20 +1,11 @@
-    ; idea: keep copy of NT&AT data in RAM, edit it, copy changed bytes to VRAM
-
     ; value to fill unused areas with
     fillvalue $ff
 
 ; --------------------------------------------------------------------------------------------------
 ; Constants
 
-    ; memory-mapped registers
-    ppu_ctrl  equ $2000
-    ppu_mask  equ $2001
-    ppu_status equ $2002
-    ppu_scroll equ $2005
-    ppu_addr   equ $2006
-    ppu_data   equ $2007
+    ; CPU memory space
 
-    ; RAM
     frame_counter        equ $00
     square_x             equ $01  ; 0-15
     square_y             equ $02  ; 0-14
@@ -29,23 +20,35 @@
     temp                 equ $0b
     temp2                equ $0c
 
+    ppu_ctrl   equ $2000
+    ppu_mask   equ $2001
+    ppu_status equ $2002
+    ppu_scroll equ $2005
+    ppu_addr   equ $2006
+    ppu_data   equ $2007
+
+    ; PPU memory space
+
+    ppu_name_table0      equ $2000
+    ppu_attribute_table0 equ $23c0
+    ppu_palette          equ $3f00
+
 ; --------------------------------------------------------------------------------------------------
 ; iNES header
 
-    inesprg 1
-    ineschr 0
-    inesmir 1
-    inesmap 0
+    inesprg 1  ; PRG ROM size: 1 * 16 KiB
+    ineschr 0  ; CHR ROM size: 0 * 8 KiB (uses CHR RAM)
+    inesmir 1  ; name table mirroring: vertical
+    inesmap 0  ; mapper: NROM
 
 ; --------------------------------------------------------------------------------------------------
 ; Main program
 
     org $c000
 reset:
-    ; disable rendering
     lda #$00
-    sta ppu_ctrl
-    sta ppu_mask
+    sta ppu_ctrl  ; disable NMI
+    sta ppu_mask  ; hide background&sprites
 
     ; wait for start of VBlank, then wait for next VBlank
     bit ppu_status
@@ -54,12 +57,12 @@ reset:
 -   bit ppu_status
     bpl -
 
-    ; palette
-    lda #$3f
+    ; background palette
+    lda #>ppu_palette
     sta ppu_addr
     ldx #$00
     stx ppu_addr
--   lda palette, x
+-   lda background_palette, x
     sta ppu_data
     inx
     cpx #16
@@ -74,9 +77,9 @@ reset:
     bne -
 
     ; name table
-    lda #$20
+    lda #>ppu_name_table0
     sta ppu_addr
-    lda #$00
+    lda #<ppu_name_table0
     sta ppu_addr
 
     ; write the name table;
@@ -130,12 +133,12 @@ reset:
     dex
     bne -
 
-    ; attribute table - copy 56 bytes from table
+    ; attribute table - copy from table
     ldx #0
 -   lda attribute_table_data, x
     sta ppu_data
     inx
-    cpx #56
+    cpx #(7 * 8)
     bne -
 
     ; fill end of attribute table with $00
@@ -150,7 +153,7 @@ reset:
     ; scroll 8 pixels down to center the active area vertically
     lda #0
     sta ppu_scroll
-    lda #232
+    lda #(240 - 8)
     sta ppu_scroll
 
     ; wait for start of VBlank
@@ -235,7 +238,7 @@ nmi:
     ; scroll 8 pixels down to center the active area vertically
     lda #0
     sta ppu_scroll
-    lda #232
+    lda #(240 - 8)
     sta ppu_scroll
     rti
 
@@ -307,7 +310,7 @@ set_attribute_table_address:
     ; Bits: square_y: 0000ABCD, square_x: 0000EFGH, VRAM address: 00100011 11ABCEFG
 
     ; high byte
-    lda #$23
+    lda #>ppu_attribute_table0
     sta ppu_addr
 
     ; low byte
@@ -391,13 +394,14 @@ write_square_to_attribute_table:
 ; Tables
 
 and_masks:
+    ; AND bitmasks for attribute table data
     db %11111100, %11110011, %11001111, %00111111
 
-palette:
-    db $0f, $12, $14, $16
-    db $0f, $18, $1a, $1c
-    db $0f, $22, $24, $26
-    db $0f, $28, $2a, $2c
+background_palette:
+    hex 0f 12 14 16  ; black, blue, purple, red
+    hex 0f 18 1a 1c  ; black, yellow, green, teal
+    hex 0f 22 24 26  ; like 1st subpalette but lighter foreground colors
+    hex 0f 28 2a 2c  ; like 2nd subpalette but lighter foreground colors
 
 chr_data:
     ; each tile represents a quarter of a 16*16-px square

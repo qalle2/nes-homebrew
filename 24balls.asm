@@ -12,6 +12,7 @@
 ;           horizontal: $c1, $c2, $c3; $c5, $c6, $c7; ...; $dd, $de, $df
 ;           vertical:   $e1, $e2, $e3; $e5, $e6, $e7; ...; $fd, $fe, $ff
 
+    ; value to fill unused areas with
     fillvalue $ff
 
 ; --------------------------------------------------------------------------------------------------
