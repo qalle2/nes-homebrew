@@ -30,6 +30,10 @@ A 24-hour 7-segment clock. NTSC/PAL support.
 ### Color Squares
 Prints colored squares. On each frame, two adjacent squares trade places.
 
+Files:
+* `colorsquares.asm`: old version (assembled file is identical to the version I created in early 2010s)
+* `colorsquares-new.asm`: new version (uses about 1 KiB of PRG ROM)
+
 ![colorsquares.asm](colorsquares.png)
 
 ### Gradient Demo
