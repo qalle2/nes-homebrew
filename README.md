@@ -56,6 +56,21 @@ A paint program. 64&times;48 "pixels", 4 colors, palette editor, 1&times;1-pixel
 
 ![paint.asm](paint.png)
 
+### Trans flag
+92 bytes (including interrupt vectors and CHR data).
+
+![transflag.asm](transflag.png)
+
+The complete program in hexadecimal:
+```
+8e 00 20 2c 02 20 10 fb 2c 02 20 10 fb a0 02 a2
+18 8d 07 20 ca d0 fa a9 ff 88 d0 f3 a9 3f 8d 06
+20 8e 06 20 a0 03 b9 f8 ff 8d 07 20 88 10 f7 a9
+20 8d 06 20 8e 06 20 a0 05 b9 f2 ff a2 c0 8d 07
+20 ca d0 fa 88 10 f2 a9 0a 8d 01 20 d0 fe 00 01
+02 00 02 01 25 21 00 30 a4 ff ff ff
+```
+
 ## References
 * [NESDev Wiki &ndash; init code](http://wiki.nesdev.com/w/index.php/Init_code)
 * [NESDev Wiki &ndash; PPU registers](http://wiki.nesdev.com/w/index.php/PPU_registers)
