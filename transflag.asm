@@ -1,5 +1,3 @@
-    ; http://wiki.nesdev.com/w/index.php/CPU_power_up_state
-
     ; the byte to fill unused parts with
     fillvalue $ff
 
@@ -22,7 +20,7 @@
 ; The main program
 
     org $c000
-    pad $10000 - 92
+    pad $10000 - 89
 
 reset:
     ; note: A, X and Y are 0 at power-up;
@@ -31,9 +29,10 @@ reset:
     stx ppu_control  ; disable NMI
 
     ; wait for start of VBlank twice
+    iny
 -   bit ppu_status
     bpl -
--   bit ppu_status
+    dey
     bpl -
 
     ; set up CHR RAM (VRAM $0000-$002f)
@@ -82,15 +81,15 @@ write_stripe:
     lda #$0a
     sta ppu_mask
 
-    ; an infinite loop
--   bne -
+    ; an infinite loop (see first byte of data)
+irq:
 
 ; --------------------------------------------------------------------------------------------------
 ; Data
 
 stripe_bytes:
     ; read backwards
-    db $00  ; for clearing attribute table 0
+    db $00  ; for clearing attribute table 0; also the opcode for "brk"
     db $01  ; blue
     db $02  ; pink
     db $00  ; white
@@ -107,4 +106,4 @@ palette:       ; read backwards
     db $00     ; unused (also LSB of unused NMI vector)
     db $30     ; white (also MSB of unused NMI vector)
     dw reset   ; reset vector
-    dw $ffff   ; IRQ vector (unused)
+    dw irq     ; IRQ vector
