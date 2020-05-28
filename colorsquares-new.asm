@@ -37,6 +37,40 @@
     ppu_palette          equ $3f00
 
 ; --------------------------------------------------------------------------------------------------
+; Macros
+
+macro wait_vblank
+    ; wait until in VBlank
+-   bit ppu_status
+    bpl -
+endm
+
+macro wait_vblank_start
+    ; wait until start of next VBlank
+    bit ppu_status
+-   bit ppu_status
+    bpl -
+endm
+
+macro push_all
+    ; push A, X, Y
+    pha
+    txa
+    pha
+    tya
+    pha
+endm
+
+macro pull_all
+    ; pull Y, X, A
+    pla
+    tay
+    pla
+    tax
+    pla
+endm
+
+; --------------------------------------------------------------------------------------------------
 ; iNES header
 
     inesprg 1  ; PRG ROM size: 1 * 16 KiB
@@ -53,10 +87,7 @@ reset:
     sta ppu_ctrl  ; disable NMI
     sta ppu_mask  ; hide background&sprites
 
-    ; wait for start of VBlank
-    bit ppu_status
--   bit ppu_status
-    bpl -
+    wait_vblank_start
 
     lda #0
     sta frame_counter
@@ -64,115 +95,20 @@ reset:
 
     jsr pick_squares_to_swap
 
-    ; wait for next VBlank
--   bit ppu_status
-    bpl -
+    wait_vblank
 
     ; background palette
     lda #>ppu_palette
-    sta ppu_addr
     ldx #$00
-    stx ppu_addr
+    jsr set_ppu_address
 -   lda background_palette, x
     sta ppu_data
     inx
     cpx #16
     bne -
 
-    ; generate CHR RAM data
-    ; 16 tiles; each one represents a quarter of a 16*16-px square
-    ; order: first all top halves of squares, then all bottom halves:
-    ; color 0 top left, color 0 top right, color 1 top left, ..., color 3 bottom right
-    lda #$00
-    tax
-    jsr set_ppu_address
-    tay  ; tile index
-chr_data_loop:
-    ; byte 0 (tiles 0-15: 00 00 00 00, 00 00 00 00, 00 00 7f ff, 00 00 7f ff)
-    lda #$00
-    cpy #8
-    bcc +
-    lda tile_bytes0to7 - 8, y
-+   sta ppu_data
-    ; bytes 1-7 (tiles 0-15: 00 00 7f ff, 00 00 7f ff, 00 00 7f ff, 00 00 7f ff)
-    tya
-    and #%00000011
-    tax
-    lda tile_bytes0to7, x
-    ldx #7
-    jsr fill_vram
-    ; byte 8 (tiles 0-15: 00 00 00 00, 00 00 00 00, 00 00 00 00, 7f ff 7f ff)
-    lda #$00
-    cpy #8
-    bcc +
-    lda tile_bytes8to15 - 8, y
-+   sta ppu_data
-    ; bytes 9-15 (tiles 0-15: 00 00 00 00, 7f ff 7f ff, 00 00 00 00, 7f ff 7f ff)
-    tya
-    and #%00000111
-    tax
-    lda tile_bytes8to15, x
-    ldx #7
-    jsr fill_vram
-    ; end loop
-    iny
-    cpy #16
-    bne chr_data_loop
-
-    ; name table
-    lda #>ppu_name_table0
-    sta ppu_addr
-    lda #<ppu_name_table0
-    sta ppu_addr
-
-    ; write the name table;
-    ; each byte in name_table_data specifies 4*1 squares (2*2 tiles each)
-    ldx #0
---  ; Read data byte. Bits: X: 0abcdefg --> table index: 00abcdfg.
-    ; I.e., each data byte is used on two rows.
-    txa
-    and #%11111000
-    lsr
-    sta temp
-    txa
-    and #%00000011
-    ora temp
-    tay
-    lda name_table_data, y
-    tay
-    ; %00000000 if on even row, %00001000 if odd
-    txa
-    and #%00000100
-    asl
-    sta temp
-    ; store loop counter
-    stx temp2
-    ; write 4 tile pairs specified by the data byte
-    ; bits of tile number: 0000VCCH (V = bottom/top half, CC = color, H = left/right half)
-    tya
-    ldx #4
--   and #%00000011
-    asl            ; color
-    adc temp       ; top/bottom half
-    sta ppu_data   ; left corner
-    adc #1
-    sta ppu_data   ; right corner
-    tya
-    lsr
-    lsr
-    tay
-    dex
-    bne -
-    ; end of loop
-    ldx temp2
-    inx
-    cpx #(56 * 2)
-    bne --
-
-    ; fill end of name table with $00
-    lda #$00
-    ldx #(2 * 32)
-    jsr fill_vram
+    jsr generate_chr_ram_data
+    jsr write_name_table
 
     ; attribute table - copy from table
     ldx #0
@@ -193,10 +129,7 @@ chr_data_loop:
     ldx #(240 - 8)
     jsr set_ppu_scroll
 
-    ; wait for start of VBlank
-    bit ppu_status
--   bit ppu_status
-    bpl -
+    wait_vblank_start
 
     ; enable NMI
     lda #%10000000
@@ -226,12 +159,7 @@ main_loop:
 ; Non-maskable interrupt routine
 
 nmi:
-    ; push A, X, Y
-    pha
-    txa
-    pha
-    tya
-    pha
+    push_all
 
     ; read current color of first square
     lda moving_square1_x
@@ -285,16 +213,196 @@ nmi:
     lda #1
     sta nmi_done
 
-    ; pull Y, X, A
-    pla
-    tay
-    pla
-    tax
-    pla
+    pull_all
     rti
 
 ; --------------------------------------------------------------------------------------------------
-; Subroutines
+
+generate_chr_ram_data:
+    ; Generate CHR RAM data from RLE data.
+
+    lda #$00
+    tax
+    jsr set_ppu_address
+
+    ; X is also RLE pointer
+rle_loop:
+    ; get CHR byte from RLE byte via LUT, push it
+    lda chr_rle_data, x
+    and #$03
+    tay
+    lda chr_bytes, y
+    pha
+    ; get RLE count
+    lda chr_rle_data, x
+    lsr
+    lsr
+    tay
+    ; write CHR byte Y times
+    pla
+-   sta ppu_data
+    dey
+    bne -
+    ; end loop
+    inx
+    cpx #(chr_rle_data_end - chr_rle_data)
+    bne rle_loop
+
+rle_exit:
+    rts
+
+chr_rle_data:
+    ; RLE-compressed CHR RAM data (16 tiles, 256 bytes).
+    ; Bits: CCCCCCII (C=count, I=index to chr_bytes).
+
+    ; uncompressed data:
+    ; tile $00:  00 00 00 00 00 00 00 00   00 00 00 00 00 00 00 00
+    ; tile $01:  00 00 00 00 00 00 00 00   00 00 00 00 00 00 00 00
+    ; tile $02:  00 7f 7f 7f 7f 7f 7f 7f   00 00 00 00 00 00 00 00
+    ; tile $03:  00 ff ff ff ff ff ff ff   00 00 00 00 00 00 00 00
+    ; tile $04:  00 00 00 00 00 00 00 00   00 7f 7f 7f 7f 7f 7f 7f
+    ; tile $05:  00 00 00 00 00 00 00 00   00 ff ff ff ff ff ff ff
+    ; tile $06:  00 7f 7f 7f 7f 7f 7f 7f   00 7f 7f 7f 7f 7f 7f 7f
+    ; tile $07:  00 ff ff ff ff ff ff ff   00 ff ff ff ff ff ff ff
+    ; tile $08:  00 00 00 00 00 00 00 00   00 00 00 00 00 00 00 00
+    ; tile $09:  00 00 00 00 00 00 00 00   00 00 00 00 00 00 00 00
+    ; tile $0a:  7f 7f 7f 7f 7f 7f 7f 7f   00 00 00 00 00 00 00 00
+    ; tile $0b:  ff ff ff ff ff ff ff ff   00 00 00 00 00 00 00 00
+    ; tile $0c:  00 00 00 00 00 00 00 00   7f 7f 7f 7f 7f 7f 7f 7f
+    ; tile $0d:  00 00 00 00 00 00 00 00   ff ff ff ff ff ff ff ff
+    ; tile $0e:  7f 7f 7f 7f 7f 7f 7f 7f   7f 7f 7f 7f 7f 7f 7f 7f
+    ; tile $0f:  ff ff ff ff ff ff ff ff   ff ff ff ff ff ff ff ff
+
+    ; tiles $00-$04
+    db (33 << 2) | 0
+    db ( 7 << 2) | 1
+    db ( 9 << 2) | 0
+    db ( 7 << 2) | 2
+    db (17 << 2) | 0
+    db ( 7 << 2) | 1
+
+    ; tile $05
+    db ( 9 << 2) | 0
+    db ( 7 << 2) | 2
+
+    ; tiles $06-$07
+    db ( 1 << 2) | 0
+    db ( 7 << 2) | 1
+    db ( 1 << 2) | 0
+    db ( 7 << 2) | 1
+    db ( 1 << 2) | 0
+    db ( 7 << 2) | 2
+    db ( 1 << 2) | 0
+    db ( 7 << 2) | 2
+
+    ; tiles $08-$09
+    db (32 << 2) | 0
+
+    ; tile $0a
+    db ( 8 << 2) | 1
+    db ( 8 << 2) | 0
+
+    ; tiles $0b-$0c
+    db ( 8 << 2) | 2
+    db (16 << 2) | 0
+    db ( 8 << 2) | 1
+
+    ; tile $0d
+    db ( 8 << 2) | 0
+    db ( 8 << 2) | 2
+
+    ; tile $0e
+    db (16 << 2) | 1
+
+    ; tile $0f
+    db (16 << 2) | 2
+
+chr_rle_data_end:
+
+chr_bytes:
+    hex 00 7f ff
+
+; --------------------------------------------------------------------------------------------------
+
+write_name_table:
+    ; Write Name Table 0.
+    ; 16*14 squares, square = 2*2 tiles.
+    ; Each byte in name_table_data specifies 4*1 squares.
+
+    ; set PPU address, init loop counter
+    lda #>ppu_name_table0
+    ldx #$00
+    jsr set_ppu_address
+
+name_table_loop:
+    ; Write 8*1 tiles per round.
+    ; X = loop counter
+
+    ; Read data byte. Bits: X=0ABCDEFG, table index=00ABCDFG. (Each byte is used on two tile rows.)
+    txa
+    and #%01111000
+    lsr
+    sta temp
+    txa
+    and #%00000011
+    ora temp
+    tay
+    lda name_table_data, y
+    tay
+    ; %00000000 if on even row, %00001000 if odd
+    txa
+    and #%00000100
+    asl
+    sta temp
+    ; store loop counter
+    stx temp2
+    ; write 8*1 tiles according to data byte
+    ; bits of tile number: 0000VCCH (V = bottom/top half, CC = color, H = left/right half)
+    tya
+    ldx #4
+-   and #%00000011
+    asl            ; color
+    ora temp       ; top/bottom half
+    sta ppu_data   ; left corner
+    ora #$01
+    sta ppu_data   ; right corner
+    tya
+    lsr
+    lsr
+    tay
+    dex
+    bne -
+    ; end of loop
+    ldx temp2
+    inx
+    cpx #(28 * 4)
+    bne name_table_loop
+
+    ; fill end of name table with $00
+    lda #$00
+    ldx #(2 * 32)
+    jsr fill_vram
+
+    rts
+
+name_table_data:
+    ; 14 * 4 = 56 bytes
+    hex 66 77 7b af
+    hex ed 99 da e6
+    hex 56 99 65 ae
+    hex 6a e6 76 db
+    hex a7 bd 9f d5
+    hex fd df 6b a7
+    hex eb 65 99 b6
+    hex 59 f6 ff d9
+    hex 7b e5 65 75
+    hex 6e e7 a6 ef
+    hex fb 5f 69 9e
+    hex 55 65 bb 79
+    hex 6b 9f 66 ea
+    hex a6 6f bb 9e
+
+; --------------------------------------------------------------------------------------------------
 
 set_ppu_address:
     bit ppu_status  ; clear ppu_addr/ppu_scroll address latch
@@ -473,21 +581,6 @@ background_palette:
     hex 0f 18 1a 1c  ; black, yellow, green, teal
     hex 0f 22 24 26  ; like 1st subpalette but lighter foreground colors
     hex 0f 28 2a 2c  ; like 2nd subpalette but lighter foreground colors
-
-tile_bytes0to7:
-    hex 00 00 7f ff  00 00 7f ff
-tile_bytes8to15:
-    hex 00 00 00 00  7f ff 7f ff
-
-name_table_data:
-    ; 56 bytes
-    hex 66 77 7b af ed 99 da e6
-    hex 56 99 65 ae 6a e6 76 db
-    hex a7 bd 9f d5 fd df 6b a7
-    hex eb 65 99 b6 59 f6 ff d9
-    hex 7b e5 65 75 6e e7 a6 ef
-    hex fb 5f 69 9e 55 65 bb 79
-    hex 6b 9f 66 ea a6 6f bb 9e
 
 attribute_table_data:
     ; 56 bytes
