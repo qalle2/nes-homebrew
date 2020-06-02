@@ -1,3 +1,3 @@
 @echo off
 cls
-asm6f colorsquares.asm colorsquares.nes
+asm6f -L colorsquares.asm colorsquares.nes
