@@ -16,8 +16,8 @@
     square_old_at_value1 equ $09
     square_old_at_value2 equ $0a
     temp                 equ $0b
-    temp2                equ $0c
-    nmi_done             equ $0d
+    nmi_done             equ $0c
+    name_table_data      equ $80  ; 14 * 4 = 56 bytes
 
 ; --- iNES header ----------------------------------------------------------------------------------
 

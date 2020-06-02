@@ -24,6 +24,9 @@ joypad2  equ $4017
 
 ; PPU memory space
 
+ppu_pattern_table0   equ $0000
+ppu_pattern_table1   equ $1000
+
 ppu_name_table0      equ $2000
 ppu_attribute_table0 equ $23c0
 ppu_name_table1      equ $2400

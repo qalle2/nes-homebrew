@@ -1,4 +1,7 @@
 nmi:
+    ; TODO: modify name_table_data in CPU RAM and update the change to VRAM instead of reading
+    ; VRAM.
+
     push_all
 
     ; read current color of first square
@@ -51,10 +54,14 @@ nmi:
     pull_all
     rti
 
+; --------------------------------------------------------------------------------------------------
+
 set_name_table_address:
     ; Set VRAM address to top left tile of (square_x, square_y) in name table.
     ; Also return: A=low byte, X=high byte.
     ; Bits: square_y: 0000ABCD, square_x: 0000EFGH, VRAM address: 001000AB CD0EFGH0
+
+    bit ppu_status
 
     ; high byte
     lda square_y
