@@ -1,23 +1,17 @@
-    ; idea: keep copy of NT&AT data in RAM, edit it, copy changed bytes to VRAM
-
     include "_common.asm"
 
 ; --- Constants ------------------------------------------------------------------------------------
 
-    frame_counter        equ $00
-    square_x             equ $01  ; 0-15
-    square_y             equ $02  ; 0-14
-    moving_square1_x     equ $03
-    moving_square1_y     equ $04
-    moving_square2_x     equ $05
-    moving_square2_y     equ $06
-    square_old_nt_value1 equ $07
-    square_old_nt_value2 equ $08
-    square_old_at_value1 equ $09
-    square_old_at_value2 equ $0a
-    temp                 equ $0b
-    nmi_done             equ $0c
-    name_table_data      equ $80  ; 14 * 4 = 56 bytes
+    frame_counter    equ $00
+    square_x         equ $01  ; 0-15
+    square_y         equ $02  ; 0-14
+    moving_square1_x equ $03
+    moving_square1_y equ $04
+    moving_square2_x equ $05
+    moving_square2_y equ $06
+    temp             equ $07
+    nmi_done         equ $08
+    name_table_data  equ $80  ; 14 * 4 = 56 bytes
 
 ; --- iNES header ----------------------------------------------------------------------------------
 
