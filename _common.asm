@@ -71,14 +71,12 @@ endm
 
 macro wait_vblank
     ; Wait until we're in VBlank.
-
 -   bit ppu_status
     bpl -
 endm
 
 macro wait_vblank_start
     ; Wait until we're at the start of VBlank.
-
     bit ppu_status
 -   bit ppu_status
     bpl -
@@ -86,7 +84,6 @@ endm
 
 macro load_ax word
     ; Copy high byte of word into A and low byte into X.
-
     lda #>word
     if <word = >word
         tax
@@ -95,9 +92,20 @@ macro load_ax word
     endif
 endm
 
+macro push_x
+    ; Push X via A.
+    txa
+    pha
+endm
+
+macro push_y
+    ; Push Y via A.
+    tya
+    pha
+endm
+
 macro push_all
     ; Push A, X and Y.
-
     pha
     txa
     pha
@@ -105,12 +113,41 @@ macro push_all
     pha
 endm
 
+macro pull_x
+    ; Pull (pop) X via A.
+    pla
+    tax
+endm
+
+macro pull_y
+    ; Pull (pop) Y via A.
+    pla
+    tay
+endm
+
 macro pull_all
     ; Pull (pop) Y, X and A.
-
     pla
     tay
     pla
     tax
     pla
+endm
+
+macro add operand
+    ; Add without carry.
+    clc
+    adc operand
+endm
+
+macro sub operand
+    ; Subtract.
+    sec
+    sbc operand
+endm
+
+macro copy src dest
+    ; Copy via A.
+    lda src
+    sta dest
 endm
