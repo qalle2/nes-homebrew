@@ -4,47 +4,49 @@ nmi:
 
     push_all
 
-    ; read current color of first square
-    lda moving_square1_x
-    sta square_x
-    lda moving_square1_y
-    sta square_y
-    jsr set_name_table_address  ; in: square_x, square_y; out: X, A
-    lda ppu_data  ; garbage read
+    ; access first square
+    copy moving_square1_x, square_x
+    copy moving_square1_y, square_y
+
+    ; read & push tile number and attribute color (1-3)
+    jsr set_name_table_address  ; square_x, square_y -> X, A
+    lda ppu_data                ; garbage read
     lda ppu_data
     pha
-    jsr read_square_from_attribute_table  ; in: square_x, square_y; out: A
+    jsr get_square_attribute
     pha
 
-    ; read current color of second square
-    lda moving_square2_x
-    sta square_x
-    lda moving_square2_y
-    sta square_y
-    jsr set_name_table_address  ; in: square_x, square_y; out: X, A
-    lda ppu_data  ; garbage read
+    ; access second square
+    copy moving_square2_x, square_x
+    copy moving_square2_y, square_y
+
+    ; read & push tile number and attribute color (1-3)
+    jsr set_name_table_address  ; square_x, square_y -> X, A
+    lda ppu_data                ; garbage read
     lda ppu_data
-    sta square_old_nt_value2
-    jsr read_square_from_attribute_table  ; in: square_x, square_y; out: A
-    sta square_old_at_value2
+    pha
+    jsr get_square_attribute
+    pha
 
-    ; write new second square
-    pla
-    tay
-    jsr write_square_to_attribute_table  ; in: Y, square_X, square_Y
-    pla
-    tay
-    jsr write_square_to_name_table
+    ; access first square
+    copy moving_square1_x, square_x
+    copy moving_square1_y, square_y
 
-    ; write new first square
-    lda moving_square1_x
-    sta square_x
-    lda moving_square1_y
-    sta square_y
-    ldy square_old_nt_value2
-    jsr write_square_to_name_table
-    ldy square_old_at_value2
-    jsr write_square_to_attribute_table  ; in: Y, square_X, square_Y
+    ; write new values
+    pull_y
+    jsr set_square_attribute        ; Y, square_x, square_y -> none
+    pull_y
+    jsr write_square_to_name_table  ; Y, square_x, square_y -> none
+
+    ; access second square
+    copy moving_square2_x, square_x
+    copy moving_square2_y, square_y
+
+    ; write new values
+    pull_y
+    jsr set_square_attribute        ; Y, square_x, square_y -> none
+    pull_y
+    jsr write_square_to_name_table  ; Y, square_x, square_y -> none
 
     jsr reset_ppu_address
 
@@ -57,9 +59,13 @@ nmi:
 ; --------------------------------------------------------------------------------------------------
 
 set_name_table_address:
-    ; Set VRAM address to top left tile of (square_x, square_y) in name table.
-    ; Also return: A=low byte, X=high byte.
-    ; Bits: square_y: 0000ABCD, square_x: 0000EFGH, VRAM address: 001000AB CD0EFGH0
+    ; Set VRAM address to top left tile of specified square in name table.
+    ; called by: nmi, write_square_to_name_table
+    ; in: square_x, square_y
+    ; out: X=high byte, A=low byte
+    ; scrambles: -
+
+    ; bits: square_y=0000ABCD, square_x=0000EFGH -> X=001000AB, A=CD0EFGH0
 
     bit ppu_status
 
@@ -67,101 +73,129 @@ set_name_table_address:
     lda square_y
     lsr
     lsr
-    ora #%00100000
+    ora #$20
     sta ppu_addr
     tax
 
     ; low byte
-    lda square_y  ; 0000ABCD
-    lsr           ; 00000ABC, carry=D
-    ror           ; D00000AB, carry=C
-    ror           ; CD00000A, carry=B
-    lsr           ; 0CD00000, carry=A
-    ora square_x  ; 0CD0EFGH, carry=A
-    asl           ; CD0EFGH0
+    lda square_y
+    lsr
+    ror
+    ror
+    lsr
+    ora square_x
+    asl
     sta ppu_addr
 
     rts
 
 write_square_to_name_table:
-    ; Write Y to name table at (square_x, square_y).
+    ; Write square to name table.
+    ; called by: nmi
+    ; in: Y (0/2/4/6), square_x, square_y
+    ; scrambles: A, X, Y
 
     ; top row
-    jsr set_name_table_address  ; in: square_x, square_y; out: X, A
+    jsr set_name_table_address  ; square_x, square_y -> X, A
     sty ppu_data
     iny
     sty ppu_data
 
     ; bottom row
     stx ppu_addr
-    ora #%00100000
+    ora #$20
     sta ppu_addr
     dey
     tya
-    ora #%00001000
+    ora #$08
     sta ppu_data
     tay
     iny
     sty ppu_data
     rts
 
-set_attribute_table_address:
-    ; Set VRAM address to (square_x, square_y) in attribute table.
-    ; Bits: square_y: 0000ABCD, square_x: 0000abcd, VRAM address: 00100011 11ABCabc
+; --------------------------------------------------------------------------------------------------
 
-    ; high byte
-    lda #>ppu_attribute_table0
-    sta ppu_addr
+get_square_attribute:
+    ; Get attribute color of specified square.
+    ; called by: nmi
+    ; in: square_x, square_y
+    ; out: A (1-3)
+    ; scrambles: A, X
 
-    ; low byte
-    lda square_y                ; 0000ABCD
-    and #%00001110              ; 0000ABC0
-    rept 3
-        asl                     ; 0ABC0000
-    endr
-    ora square_x                ; 0ABCabcd
-    lsr                         ; 00ABCabc
-    ora #<ppu_attribute_table0  ; 11ABCabc
-    sta ppu_addr
-
-    rts
-
-get_attribute_byte_bit_position:
-    ; Return position of (square_x, square_y) within attribute byte in X (0-3).
-    ; Bits: square_y: 0000ABCD, square_x: 0000EFGH, position: 000000DH
-
+    ; get bit position of attribute block within byte
     lda square_x
     lsr
     lda square_y
     rol
-    and #%00000011
+    and #$03
     tax
-    rts
 
-read_square_from_attribute_table:
-    ; Return value of (square_x, square_y) in attribute table in A (0-3).
+    ; set PPU address
+    ; bits: square_y: 0000ABCD, square_x: 0000abcd -> 00100011 11ABCabc
+    ; high byte
+    lda #$23
+    sta ppu_addr
+    ; low byte
+    lda square_y
+    and #$0e
+    asl
+    asl
+    asl
+    ora square_x
+    lsr
+    ora #$c0
+    sta ppu_addr
 
-    jsr set_attribute_table_address
-    jsr get_attribute_byte_bit_position
+    ; read byte
     lda ppu_data
     lda ppu_data
 
-    ; shift important bits to least significant positions
+    ; shift important bits to LSBs
     cpx #0
-    beq +
+    beq shift_done
 -   lsr
     lsr
     dex
     bne -
-+   and #%00000011
+shift_done:
+    and #$03
+
     rts
 
-write_square_to_attribute_table:
-    ; Write Y (0-3) to attribute table at (square_x, square_y).
+set_square_attribute:
+    ; Write attribute color to specified square.
+    ; called by: nmi
+    ; in: Y (0-3), square_x, square_y
+    ; scrambles: A, X, Y
 
-    ; read old byte, get bit position to change
-    jsr set_attribute_table_address
-    jsr get_attribute_byte_bit_position
+    ; get bit position of attribute block within byte
+    lda square_x
+    lsr
+    lda square_y
+    rol
+    and #$03
+    tax
+
+    ; set PPU address, push for later use
+    ; bits: square_y: 0000ABCD, square_x: 0000abcd -> 00100011 11ABCabc
+    ; high byte
+    lda #$23
+    sta ppu_addr
+    pha
+    ; low byte
+    lda square_y
+    and #$0e
+    asl
+    asl
+    asl
+    ora square_x
+    lsr
+    ora #$c0
+    sta ppu_addr
+    pha
+
+    ; read old byte
     lda ppu_data
     lda ppu_data
 
@@ -172,18 +206,28 @@ write_square_to_attribute_table:
     ; shift new bits to correct position, combine with old byte
     tya
     cpx #0
-    beq +
+    beq shift_done2
 -   asl
     asl
     dex
     bne -
-+   ora temp
+shift_done2:
+
+    ; combine old and new bits
+    ora temp
     tax
 
-    jsr set_attribute_table_address
+    ; pull & set PPU address
+    pull_y
+    pla
+    sta ppu_addr
+    sty ppu_addr
+
+    ; write new byte
     stx ppu_data
+
     rts
 
 and_masks:
     ; AND bitmasks for attribute table data
-    db %11111100, %11110011, %11001111, %00111111
+    hex fc f3 cf 3f
