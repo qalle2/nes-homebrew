@@ -83,12 +83,12 @@ macro wait_vblank_start
 endm
 
 macro load_ax word
-    ; Copy high byte of word into A and low byte into X.
-    lda #>word
-    if <word = >word
+    ; Copy high byte of immediate word into A and low byte into X.
+    lda #>(word)
+    if <(word) = >(word)
         tax
     else
-        ldx #<word
+        ldx #<(word)
     endif
 endm
 

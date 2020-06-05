@@ -1,0 +1,208 @@
+reset:
+    initialize_nes
+
+    ; clear zero page
+    lda #$00
+    tax
+-   sta $00, x
+    inx
+    bne -
+
+    inc color  ; default color: 1
+
+    sec
+    ror nmi_done  ; set flag
+
+    wait_for_vblank
+
+    ; set palette
+    load_ax $3f00
+    jsr set_vram_address
+-   lda initial_palette, x
+    sta ppu_data
+    inx
+    cpx #32
+    bne -
+
+    ; First half of CHR RAM (background).
+    ; Contains all combinations of 2*2 subpixels * 4 colors.
+    ; Bits of tile index: AaBbCcDd
+    ; Corresponding subpixel colors (capital letter = MSB, small letter = LSB):
+    ; Aa Bb
+    ; Cc Dd
+    load_ax $0000
+    jsr set_vram_address
+    ldy #15
+--  ldx #15
+-   lda background_chr_data1, y
+    jsr print_four_times
+    lda background_chr_data1, x
+    jsr print_four_times
+    lda background_chr_data2, y
+    jsr print_four_times
+    lda background_chr_data2, x
+    jsr print_four_times
+    dex
+    bpl -
+    dey
+    bpl --
+
+    ; second half of CHR RAM (sprites, 2 * 256 = 512 bytes)
+    ldx #0
+-   lda sprite_chr_data, x
+    sta ppu_data
+    inx
+    bne -
+-   lda sprite_chr_data + 256, x
+    sta ppu_data
+    inx
+    bne -
+
+    ; name table
+    load_ax $2000
+    jsr set_vram_address
+    ; top bar (4 rows)
+    lda #%01010101  ; block of color 1
+    ldx #32
+    jsr print_repeatedly
+    ldx #0
+-   lda logo, x
+    sta ppu_data
+    inx
+    cpx #(3 * 32)
+    bne -
+    ; paint area (24 rows)
+    lda #$00
+    ldx #(6 * 32)
+-   jsr print_four_times
+    dex
+    bne -
+    ; bottom bar (2 rows)
+    lda #%01010101  ; block of color 1
+    ldx #64
+    jsr print_repeatedly
+
+    ; attribute table
+    ; top bar
+    lda #%01010101
+    ldx #8
+    jsr print_repeatedly
+    ; paint area
+    lda #%00000000
+    ldx #(6 * 8)
+    jsr print_repeatedly
+    ; bottom bar
+    lda #%00000101
+    sta ppu_data
+    sta ppu_data
+    ldx #%00000100
+    stx ppu_data
+    ldx #5
+    jsr print_repeatedly
+
+    ; user palette
+    ldx #3
+-   lda initial_palette, x
+    sta user_palette, x
+    dex
+    bpl -
+
+    ; paint mode sprites
+    ldx #(paint_mode_sprite_count * 4 - 1)
+-   lda paint_mode_sprites, x
+    sta sprite_data, x
+    dex
+    bpl -
+    ; hide other sprites
+    lda #$ff
+    ldx #(paint_mode_sprite_count * 4)
+-   sta sprite_data, x
+    inx
+    bne -
+
+    lda #button_select
+    sta prev_joypad_status
+
+    ; clear VRAM address & scroll
+    load_ax $0000
+    jsr set_vram_address
+    sta ppu_scroll
+    sta ppu_scroll
+
+    wait_vblank_start
+
+    ; enable NMI, use pattern table 1 for sprites
+    lda #%10001000
+    sta ppu_ctrl
+
+    ; show background&sprites
+    lda #%00011110
+    sta ppu_mask
+
+    jmp main_loop
+
+; --------------------------------------------------------------------------------------------------
+
+print_four_times:
+    sta ppu_data
+    sta ppu_data
+    sta ppu_data
+    sta ppu_data
+    rts
+
+print_repeatedly:
+    ; print A X times
+-   sta ppu_data
+    dex
+    bne -
+    rts
+
+; --------------------------------------------------------------------------------------------------
+
+    ; for generating background CHR data (read backwards)
+background_chr_data1:
+    hex ff f0 ff f0  0f 00 0f 00  ff f0 ff f0  0f 00 0f 00
+background_chr_data2:
+    hex ff ff f0 f0  ff ff f0 f0  0f 0f 00 00  0f 0f 00 00
+
+paint_nt_addresses_h:
+    hex 20 21 21 22 22 23
+paint_nt_addresses_l:
+    hex 80 a0 c0 e0 00 20 40 60
+
+    ; name table data for the logo in the top bar (colors 2&3 on color 1; 1 byte = 2*2 subpixels)
+    ; bits of tile index: AaBbCcDd
+    ; subpixel colors:
+    ; Aa Bb
+    ; Cc Dd
+logo:
+    hex 555555 66 66 66 66 66 a5 55 55 66 a6 66 a5 66 a5 55 55 66 a6 66 a6 66 66 a6 65 a9 55555555
+    hex 555555 66 96 66 a6 65 a6 75 f5 66 66 66 a5 65 a6 75 f5 66 a5 66 a6 66 66 66 55 99 55555555
+    hex 555555 65 65 65 65 65 a5 55 55 65 65 65 a5 65 a5 55 55 65 55 65 65 65 65 65 55 95 55555555
+
+initial_palette:
+    ; background
+    db white, red,    green, blue    ; paint area; same as two last sprite subpalettes
+    db white, yellow, green, purple  ; top and bottom bar
+    db white, white,  white, white   ; unused
+    db white, white,  white, white   ; unused
+    ; sprites
+    db white, yellow, black, olive   ; status bar cover sprite, status bar text, paint cursor
+    db white, black,  white, yellow  ; palette editor - text and cursor
+    db white, black,  white, red     ; palette editor - selected colors 0&1
+    db white, black,  green, blue    ; palette editor - selected colors 2&3
+
+paint_mode_sprites:
+    db $00       , $02, %00000000, 0 * 8   ; cursor
+    db 28 * 8 - 1, $00, %00000000, 1 * 8   ; tens of X position
+    db 28 * 8 - 1, $00, %00000000, 2 * 8   ; ones of X position
+    db 28 * 8 - 1, $00, %00000000, 5 * 8   ; tens of Y position
+    db 28 * 8 - 1, $00, %00000000, 6 * 8   ; ones of Y position
+    db 28 * 8 - 1, $04, %00000000, 3 * 8   ; comma
+    db 28 * 8 - 1, $01, %00000000, 9 * 8   ; cover 1
+    db 29 * 8 - 1, $01, %00000000, 8 * 8   ; cover 2
+    db 29 * 8 - 1, $01, %00000000, 9 * 8   ; cover 3
+
+    ; CHR data (second half, sprites)
+sprite_chr_data:
+    incbin "paint-sprites.chr"  ; 32 tiles (512 bytes)
