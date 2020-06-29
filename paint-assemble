@@ -1,0 +1,7 @@
+# This batch file will DELETE files. Use at your own risk.
+
+rm -f paint-sprites.chr
+python3 ../nes-util/nes_chr_encode.py paint-sprites.png paint-sprites.chr
+asm6f paint.asm -L paint.nes
+rm paint-sprites.chr
+
