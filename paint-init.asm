@@ -1,10 +1,37 @@
 reset:
     initialize_nes
 
+    lda #$00
+    sta snd_chn  ; disable all sound channels
+
     ; clear zero page
     lda #$00
     tax
 -   sta $00, x
+    inx
+    bne -
+
+    ; init user palette
+    ldx #3
+-   lda initial_palette, x
+    sta user_palette, x
+    dex
+    bpl -
+
+    ; copy initial sprite data (paint mode, palette edit mode)
+    ldx #((9 + 13) * 4 - 1)
+-   lda initial_sprite_data, x
+    sta sprite_data, x
+    dex
+    bpl -
+
+    ; hide palette editor sprites and unused sprites
+    lda #$ff
+    ldx #(9 * 4)
+-   sta sprite_data, x
+    inx
+    inx
+    inx
     inx
     bne -
 
@@ -16,7 +43,8 @@ reset:
     wait_for_vblank
 
     ; set palette
-    load_ax $3f00
+    lda #$3f
+    ldx #$00
     jsr set_vram_address
 -   lda initial_palette, x
     sta ppu_data
@@ -30,7 +58,8 @@ reset:
     ; Corresponding subpixel colors (capital letter = MSB, small letter = LSB):
     ; Aa Bb
     ; Cc Dd
-    load_ax $0000
+    lda #$00
+    tax
     jsr set_vram_address
     ldy #15
 --  ldx #15
@@ -59,7 +88,8 @@ reset:
     bne -
 
     ; name table
-    load_ax $2000
+    lda #$20
+    ldx #$00
     jsr set_vram_address
     ; top bar (4 rows)
     lda #%01010101  ; block of color 1
@@ -100,31 +130,9 @@ reset:
     ldx #5
     jsr print_repeatedly
 
-    ; user palette
-    ldx #3
--   lda initial_palette, x
-    sta user_palette, x
-    dex
-    bpl -
-
-    ; paint mode sprites
-    ldx #(paint_mode_sprite_count * 4 - 1)
--   lda paint_mode_sprites, x
-    sta sprite_data, x
-    dex
-    bpl -
-    ; hide other sprites
-    lda #$ff
-    ldx #(paint_mode_sprite_count * 4)
--   sta sprite_data, x
-    inx
-    bne -
-
-    lda #button_select
-    sta prev_joypad_status
-
     ; clear VRAM address & scroll
-    load_ax $0000
+    lda #$00
+    tax
     jsr set_vram_address
     sta ppu_scroll
     sta ppu_scroll
@@ -165,11 +173,6 @@ background_chr_data1:
 background_chr_data2:
     hex ff ff f0 f0  ff ff f0 f0  0f 0f 00 00  0f 0f 00 00
 
-paint_nt_addresses_h:
-    hex 20 21 21 22 22 23
-paint_nt_addresses_l:
-    hex 80 a0 c0 e0 00 20 40 60
-
     ; name table data for the logo in the top bar (colors 2&3 on color 1; 1 byte = 2*2 subpixels)
     ; bits of tile index: AaBbCcDd
     ; subpixel colors:
@@ -192,8 +195,9 @@ initial_palette:
     db white, black,  white, red     ; palette editor - selected colors 0&1
     db white, black,  green, blue    ; palette editor - selected colors 2&3
 
-paint_mode_sprites:
-    db $00       , $02, %00000000, 0 * 8   ; cursor
+initial_sprite_data:
+    ; paint mode (9 sprites)
+    db  0 * 8 - 1, $02, %00000000, 0 * 8   ; cursor
     db 28 * 8 - 1, $00, %00000000, 1 * 8   ; tens of X position
     db 28 * 8 - 1, $00, %00000000, 2 * 8   ; ones of X position
     db 28 * 8 - 1, $00, %00000000, 5 * 8   ; tens of Y position
@@ -203,6 +207,22 @@ paint_mode_sprites:
     db 29 * 8 - 1, $01, %00000000, 8 * 8   ; cover 2
     db 29 * 8 - 1, $01, %00000000, 9 * 8   ; cover 3
 
+    ; palette editor mode (13 sprites)
+    db 22 * 8 - 1, $07, %00000001, 1 * 8   ; cursor
+    db 22 * 8 - 1, $08, %00000010, 2 * 8   ; selected color 0
+    db 23 * 8 - 1, $09, %00000010, 2 * 8   ; selected color 1
+    db 24 * 8 - 1, $08, %00000011, 2 * 8   ; selected color 2
+    db 25 * 8 - 1, $09, %00000011, 2 * 8   ; selected color 3
+    db 26 * 8 - 1, $01, %00000001, 1 * 8   ; 16s  of color number
+    db 26 * 8 - 1, $01, %00000001, 2 * 8   ; ones of color number
+    db 21 * 8 - 1, $05, %00000001, 1 * 8   ; left half of "PAL"
+    db 21 * 8 - 1, $06, %00000001, 2 * 8   ; right half of "PAL"
+    db 22 * 8 - 1, $01, %00000001, 1 * 8   ; blank
+    db 23 * 8 - 1, $01, %00000001, 1 * 8   ; blank
+    db 24 * 8 - 1, $01, %00000001, 1 * 8   ; blank
+    db 25 * 8 - 1, $01, %00000001, 1 * 8   ; blank
+
     ; CHR data (second half, sprites)
 sprite_chr_data:
     incbin "paint-sprites.chr"  ; 32 tiles (512 bytes)
+

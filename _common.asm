@@ -1,11 +1,6 @@
-; Stuff used by many programs.
-
-    ; value to fill unused areas with
-    fillvalue $ff
+; Constants and macros used by many programs.
 
 ; --- Constants ------------------------------------------------------------------------------------
-
-; CPU memory space
 
 ppu_ctrl   equ $2000
 ppu_mask   equ $2001
@@ -21,27 +16,6 @@ oam_dma  equ $4014
 snd_chn  equ $4015
 joypad1  equ $4016
 joypad2  equ $4017
-
-; PPU memory space
-
-ppu_pattern_table0   equ $0000
-ppu_pattern_table1   equ $1000
-
-ppu_name_table0      equ $2000
-ppu_attribute_table0 equ $23c0
-ppu_name_table1      equ $2400
-ppu_attribute_table1 equ $27c0
-ppu_name_table2      equ $2800
-ppu_attribute_table2 equ $2bc0
-ppu_name_table3      equ $2c00
-ppu_attribute_table3 equ $2fc0
-
-ppu_palette equ $3f00
-
-; Colors
-
-color_black equ $0f
-color_white equ $30
 
 ; --- Macros ---------------------------------------------------------------------------------------
 
@@ -63,91 +37,19 @@ macro initialize_nes
     stx ppu_mask     ; disable rendering
     stx dmc_freq     ; disable DMC IRQs
 
-    ; wait until we're at the start of VBlank
-    bit ppu_status
--   bit ppu_status
-    bpl -
+    wait_vblank_start
 endm
 
 macro wait_vblank
-    ; Wait until we're in VBlank.
+    ; wait until in VBlank
 -   bit ppu_status
     bpl -
 endm
 
 macro wait_vblank_start
-    ; Wait until we're at the start of VBlank.
+    ; wait until at start of VBlank
     bit ppu_status
 -   bit ppu_status
     bpl -
 endm
 
-macro load_ax word
-    ; Copy high byte of immediate word into A and low byte into X.
-    lda #>(word)
-    if <(word) = >(word)
-        tax
-    else
-        ldx #<(word)
-    endif
-endm
-
-macro push_x
-    ; Push X via A.
-    txa
-    pha
-endm
-
-macro push_y
-    ; Push Y via A.
-    tya
-    pha
-endm
-
-macro push_all
-    ; Push A, X and Y.
-    pha
-    txa
-    pha
-    tya
-    pha
-endm
-
-macro pull_x
-    ; Pull (pop) X via A.
-    pla
-    tax
-endm
-
-macro pull_y
-    ; Pull (pop) Y via A.
-    pla
-    tay
-endm
-
-macro pull_all
-    ; Pull (pop) Y, X and A.
-    pla
-    tay
-    pla
-    tax
-    pla
-endm
-
-macro add operand
-    ; Add without carry.
-    clc
-    adc operand
-endm
-
-macro sub operand
-    ; Subtract.
-    sec
-    sbc operand
-endm
-
-macro copy src dest
-    ; Copy via A.
-    lda src
-    sta dest
-endm

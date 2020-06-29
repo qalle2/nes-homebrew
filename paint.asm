@@ -1,26 +1,33 @@
+    ; TODO: use a 768-byte RAM buffer to avoid reading VRAM
+
     include "_common.asm"
+
+    ; value to fill unused areas with
+    fillvalue $ff
 
 ; --------------------------------------------------------------------------------------------------
 ; Constants
 
 ; RAM
 
-mode               equ $00  ; MSB: 0 = paint mode, 1 = palette edit mode
-joypad_status      equ $01
-prev_joypad_status equ $02  ; previous joypad status
-delay_left         equ $03  ; cursor move delay left
-cursor_type        equ $04  ; 0 = small (arrow), 1 = big (square)
-cursor_x           equ $05  ; cursor X position (in paint mode; 0-63)
-cursor_y           equ $06  ; cursor Y position (in paint mode; 0-47)
-color              equ $07  ; selected color (0-3)
-user_palette       equ $08  ; 4 bytes, each $00-$3f
-palette_cursor     equ $0c  ; cursor position in palette edit mode (0-3)
-vram_address       equ $0d  ; 2 bytes
-pointer            equ $0f  ; 2 bytes
-temp               equ $10
-nmi_done           equ $11  ; MSB: 0 = no, 1 = yes
+in_palette_editor  equ $00  ; flag; MSB: 0 = paint mode, 1 = palette edit mode
+nmi_done           equ $01  ; flag; MSB: 0 = no, 1 = yes
+joypad_status      equ $02
+prev_joypad_status equ $03  ; previous joypad status
+delay_left         equ $04  ; cursor move delay left
+cursor_type        equ $05  ; 0 = small (arrow), 1 = big (square)
+cursor_x           equ $06  ; cursor X position (in paint mode; 0-63)
+cursor_y           equ $07  ; cursor Y position (in paint mode; 0-47)
+color              equ $08  ; selected color (0-3)
+palette_cursor     equ $09  ; cursor position in palette edit mode (0-3)
+temp               equ $0a
+user_palette       equ $10  ; 4 bytes, each $00-$3f
+vram_address       equ $14  ; 2 bytes (high, low)
+pointer            equ $16  ; 2 bytes
+do_paint           equ $18  ; flag
 
-sprite_data equ $0200  ; 256 bytes
+sprite_data        equ $0200  ; 256 bytes; first 9 paint mode sprites, then 13 palette editor sprites
+vram_buffer        equ $0300  ; 256 bytes (for main loop -> NMI communication; TODO: implement)
 
 ; non-address constants
 
@@ -42,9 +49,7 @@ green  equ $1a
 blue   equ $02
 purple equ $04
 
-cursor_move_delay           equ 10
-paint_mode_sprite_count     equ 9
-palette_editor_sprite_count equ 13
+cursor_move_delay equ 10
 
 ; --- iNES header ----------------------------------------------------------------------------------
 
