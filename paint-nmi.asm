@@ -1,5 +1,3 @@
-; TODO: move stuff to main loop
-
 nmi:
     ; push A, X, Y
     pha
@@ -14,21 +12,22 @@ nmi:
 
     ; run one of two subs
     bit in_palette_editor
-    bmi +                  ; branch if flag set
+    bmi +
     jsr nmi_paint_mode
-    jmp nmi_end
+    jmp ++
 +   jsr nmi_palette_edit_mode
 
-nmi_end:
-    ; clear VRAM address & scroll
+    ; reset VRAM address & scroll
+++  bit ppu_status
     lda #$00
-    tax
-    jsr set_vram_address
+    sta ppu_addr
+    sta ppu_addr
     sta ppu_scroll
     sta ppu_scroll
 
+    ; set flag
     sec
-    ror nmi_done  ; set flag
+    ror nmi_done
 
     ; pull Y, X, A
     pla
@@ -42,7 +41,7 @@ nmi_end:
 ; --- Paint mode -----------------------------------------------------------------------------------
 
 nmi_paint_mode:
-    ; update selected color to bottom bar (row 28, column 8)
+    ; update selected color to bottom bar (NT 0, row 28, column 8)
     bit ppu_status  ; reset ppu_addr latch
     lda #$23
     sta ppu_addr
@@ -52,79 +51,45 @@ nmi_paint_mode:
     lda solid_color_tiles, x
     sta ppu_data
 
-    ; paint if instructed by main loop
+    ; copy nt_buffer[nt_buffer_address] to [vram_address] if instructed by main loop
     bit do_paint
     bpl +
-    jsr paint
-    lsr do_paint  ; clear flag
+    jsr update_vram_byte
+    lsr do_paint          ; clear flag
 
 +   rts
 
-; --- Paint mode - subs/tables ---------------------------------------------------------------------
+update_vram_byte:
+    ; Change one VRAM byte in the paint area.
 
-paint:
-    ; Paint a "pixel" (a quarter tile) or 2*2 "pixels" (a tile) by changing one VRAM byte between
-    ; $2080-$237f.
-    ; In: vram_address, cursor_type, color.
-    ; Writes VRAM.
+    ; compute address within nt_buffer (nt_buffer + paint_area_offset -> pointer)
+    clc
+    lda paint_area_offset + 0
+    sta pointer + 0
+    lda paint_area_offset + 1
+    adc #>nt_buffer
+    sta pointer + 1
 
-    lda cursor_type
-    beq +
+    ; compute PPU address ($2080 + paint_area_offset; low byte -> stack, high byte -> A)
+    clc
+    lda paint_area_offset + 0
+    adc #$80
+    pha
+    lda paint_area_offset + 1
+    adc #$20
 
-    ; big (square) cursor
-    ldx color
-    lda solid_color_tiles, x
-    jmp write_new_byte
-
-    ; small (arrow) cursor
-    ; position within tile (0-3) -> X
-+   lda cursor_x
-    ror
-    lda cursor_y
-    rol
-    and #%00000011
-    tax
-    ; position_within_tile * 4 + color -> Y
-    asl
-    asl
-    ora color
-    tay
-
-    ; read old byte
-    bit ppu_status  ; reset ppu_addr latch
-    lda vram_address + 0
+    ; set PPU address
+    bit ppu_status  ; reset latch
     sta ppu_addr
-    lda vram_address + 1
+    pla
     sta ppu_addr
-    lda ppu_data  ; garbage read
-    lda ppu_data
-    ; clear bits of this "pixel"
-    and and_masks, x
-    ; add new bits
-    ora or_masks, y
 
-write_new_byte:
-    bit ppu_status  ; reset ppu_addr latch
-    ldx vram_address + 0
-    stx ppu_addr
-    ldx vram_address + 1
-    stx ppu_addr
+    ; write byte
+    ldy #0
+    lda (pointer), y
     sta ppu_data
 
     rts
-
-and_masks:
-    db %00111111, %11001111, %11110011, %11111100
-
-or_masks:
-    db %00000000, %01000000, %10000000, %11000000
-    db %00000000, %00010000, %00100000, %00110000
-    db %00000000, %00000100, %00001000, %00001100
-    db %00000000, %00000001, %00000010, %00000011
-
-solid_color_tiles:
-    ; tiles of solid color 0/1/2/3
-    db %00000000, %01010101, %10101010, %11111111
 
 ; --- Palette edit mode ----------------------------------------------------------------------------
 

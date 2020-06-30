@@ -39,31 +39,78 @@ read_joypad:
 
     rts
 
-; --- Paint mode -----------------------------------------------------------------------------------
+; --------------------------------------------------------------------------------------------------
 
 main_loop_paint_mode:
-    ; only react to select, start and B (bits 6-4) if none of them was pressed on previous frame
+    ; ignore B, select, start if any of them was pressed on previous frame
     lda prev_joypad_status
-    and #$70
-    bne paint_button_read_done
+    and #(button_b | button_select | button_start)
+    bne arrow_stuff
+
+    ; check B, select, start
     lda joypad_status
-    and #$70
-    cmp #button_select
-    beq enter_palette_editor
-    cmp #button_start
-    beq change_cursor_type
     cmp #button_b
-    beq change_color
-    jmp paint_button_read_done
+    beq change_color          ; ends with rts
+    cmp #button_select
+    beq enter_palette_editor  ; ends with rts
+    cmp #button_start
+    beq change_cursor_type    ; ends with rts
+
+arrow_stuff:
+    ; if no arrow pressed, clear cursor movement delay
+    lda joypad_status
+    and #$0f
+    bne +
+    sta delay_left
+    jmp buttons_done
+    ; else if delay > 0, decrement it
++   lda delay_left
+    beq +
+    dec delay_left
+    jmp buttons_done
+    ; else react to arrows and reinitialize delay
++   jsr check_horizontal_arrows
+    jsr check_vertical_arrows
+    lda #cursor_move_delay
+    sta delay_left
+
+buttons_done:
+    ; make sprite data reflect changes to cursor
+    jsr update_paint_mode_sprite_data
+
+    ; if A pressed, tell NMI routine to paint
+    lda joypad_status
+    and #button_a
+    beq +
+
+    jsr get_paint_area_offset  ; cursor_x, cursor_y -> paint_area_offset (0-767)
+    jsr update_nt_buffer       ; update nt_buffer according to paint_area_offset/etc.
+
+    ; set flag
+    sec
+    ror do_paint
+
++   rts
+
+; --------------------------------------------------------------------------------------------------
+
+change_color:
+    ; cycle between 4 colors
+    ldx color
+    inx
+    txa
+    and #%00000011
+    sta color
+    rts
+
+; --------------------------------------------------------------------------------------------------
 
 enter_palette_editor:
-    sec
-    ror in_palette_editor  ; set flag
-
+    ; init palette cursor position, hide paint cursor
     ldx #0
-    stx palette_cursor  ; init cursor position
+    stx palette_cursor
     dex
-    stx sprite_data + 0 + 0  ; hide paint cursor
+    stx sprite_data + 0 + 0
 
     ; show palette editor sprites
     ldx #((13 - 1) * 4)
@@ -75,112 +122,96 @@ enter_palette_editor:
     dex
     bpl -
 
+    ; set flag
+    sec
+    ror in_palette_editor
+
     rts
 
+; --------------------------------------------------------------------------------------------------
+
 change_cursor_type:
+    ; toggle between small and big cursor, update sprite tile
     lda cursor_type
     eor #%00000001
     sta cursor_type
-    ; if switched to big (square) cursor, make cursor X and Y position even
+    ora #2
+    sta sprite_data + 0 + 1
+
+    ; if big, make coordinates even
     beq +
-    lda cursor_x
-    and #$3e
-    sta cursor_x
-    lda cursor_y
-    and #$3e
-    sta cursor_y
-+   jmp paint_button_read_done
+    lsr cursor_x
+    asl cursor_x
+    lsr cursor_y
+    asl cursor_y
 
-change_color:
-    ; cycle between 4 colors
-    ldx color
-    inx
-    txa
-    and #%00000011
-    sta color
++   rts
 
-paint_button_read_done:
-    ; react to arrows only if cursor movement delay has passed
-    dec delay_left
-    bpl paint_cursor_move_done
+; --------------------------------------------------------------------------------------------------
 
-    ; left/right arrow
+check_horizontal_arrows:
+    ; React to left/right arrow.
+    ; Reads: joypad_status, cursor_x, cursor_type
+    ; Changes: cursor_x
+
     lda joypad_status
-    and #(button_left | button_right)
-    tax
+    lsr
+    bcs paint_right
+    lsr
+    bcs paint_left
+    rts
+paint_right:
     lda cursor_x
-    cpx #button_left
-    beq paint_cursor_left
-    cpx #button_right
-    beq paint_cursor_right
-    jmp +
-paint_cursor_left:
-    clc
-    sbc cursor_type
-    jmp +
-paint_cursor_right:
     sec
     adc cursor_type
-+   and #%00111111  ; handle X pos over/underflow
+    jmp store_horizontal
+paint_left:
+    lda cursor_x
+    clc
+    sbc cursor_type
+store_horizontal:
+    and #%00111111
     sta cursor_x
+    rts
 
-    ; up/down arrow
+check_vertical_arrows:
+    ; React to up/down arrow.
+    ; Reads: joypad_status, cursor_x, cursor_type
+    ; Changes: cursor_x
+
     lda joypad_status
-    and #(button_up | button_down)
-    tax
-    lda cursor_y
-    cpx #button_up
-    beq paint_cursor_up
-    cpx #button_down
-    beq paint_cursor_down
-    jmp vertical_arrow_read_done
-paint_cursor_up:
-    clc
-    sbc cursor_type
-    bpl vertical_arrow_read_done
-    ; Y pos underflow
-    lda #48
-    clc
-    sbc cursor_type
-    jmp vertical_arrow_read_done
+    lsr
+    lsr
+    lsr
+    bcs paint_cursor_down
+    lsr
+    bcs paint_cursor_up
+    rts
 paint_cursor_down:
+    lda cursor_y
     sec
     adc cursor_type
     cmp #48
-    bne vertical_arrow_read_done
-    ; Y pos overflow
+    bne store_vertical
     lda #0
-vertical_arrow_read_done:
+    jmp store_vertical
+paint_cursor_up:
+    lda cursor_y
+    clc
+    sbc cursor_type
+    bpl store_vertical
+    lda #48
+    clc
+    sbc cursor_type
+store_vertical:
     and #%00111111
     sta cursor_y
+    rts
 
-    ; reinitialize cursor movement delay
-    lda #cursor_move_delay
-    sta delay_left
+; --------------------------------------------------------------------------------------------------
 
-paint_cursor_move_done:
-    ; if no arrow pressed, clear cursor movement delay
-    lda joypad_status
-    and #(button_up | button_down | button_left | button_right)
-    bne +
-    sta delay_left
-
-    ; if A pressed, tell NMI routine to paint
-+   lda joypad_status
-    and #button_a
-    beq +
-    jsr get_vram_address  ; cursor_x, cursor_y -> vram_address (for NMI routine)
-    sec
-    ror do_paint  ; set flag
-+
-
-    ; update sprite_data in RAM
-
-    ; cursor sprite tile
-    lda #2
-    clc
-    adc cursor_type
-    sta sprite_data + 0 + 1
+update_paint_mode_sprite_data:
+    ; Update sprite data regarding cursor position.
 
     ; cursor sprite X position
     lda cursor_x
@@ -224,40 +255,100 @@ paint_cursor_move_done:
 
     rts
 
-; --- Paint mode - subs/data -----------------------------------------------------------------------
-
-get_vram_address:
-    ; Compute vram_address from cursor_x and cursor_y.
+get_paint_area_offset:
+    ; Compute offset within name table data of paint area from cursor_x and cursor_y.
     ; Bits of cursor_y (0-47 or %000000-%101111): ABCDEF
     ; Bits of cursor_x (0-63 or %000000-%111111): abcdef
-    ; Bits of vram_address ($2080-$237f):         $2080 + 000000AB CDEabcde
+    ; Bits of paint_area_offset (0-767):          000000AB CDEabcde
 
     ; high byte
-    lda cursor_y             ; 00ABCDEF
+    lda cursor_y  ; 00ABCDEF
     lsr
     lsr
     lsr
-    tax                      ; 00000ABC (0-5)
-    lda vram_addresses_h, x
-    sta vram_address + 0
+    lsr           ; 000000AB
+    sta paint_area_offset + 1
 
     ; low byte
-    lda cursor_y             ; 00ABCDEF
-    and #%00001110           ; 0000CDE0
-    lsr                      ; 00000CDE (0-7)
-    tax
-    lda cursor_x             ; 00abcdef
-    lsr                      ; 000abcde
-    ora vram_addresses_l, x
-    sta vram_address + 1
+    lda cursor_y    ; 00ABCDEF
+    and #$0e        ; 0000CDE0
+    asl
+    asl
+    asl
+    asl
+    sta temp        ; CDE00000
+    lda cursor_x    ; 00abcdef
+    lsr             ; 000abcde
+    ora temp        ; CDEabcde
+    sta paint_area_offset + 0
 
     rts
 
-vram_addresses_h:
-    hex 20 21 21 22 22 23
+; --------------------------------------------------------------------------------------------------
 
-vram_addresses_l:
-    hex 80 a0 c0 e0 00 20 40 60
+update_nt_buffer:
+    ; Update a byte in nt_buffer.
+    ; In: cursor_type, cursor_x, cursor_y, color, paint_area_offset, nt_buffer
+    ; Writes: nt_buffer
+
+    ; compute address within nt_buffer (nt_buffer + paint_area_offset -> pointer)
+    clc
+    lda paint_area_offset + 0
+    sta pointer + 0
+    lda paint_area_offset + 1
+    adc #>nt_buffer
+    sta pointer + 1
+
+    ; get old byte
+    lda cursor_type
+    beq small_cursor
+
+    ; big cursor
+    ldx color
+    lda solid_color_tiles, x
+    jmp update_nt_buffer_byte
+
+small_cursor:
+    ; push old byte
+    ldy #0
+    lda (pointer), y
+    pha
+    ; position within tile (0-3) -> X
+    lda cursor_x
+    ror
+    lda cursor_y
+    rol
+    and #%00000011
+    tax
+    ; position_within_tile * 4 + color -> Y
+    asl
+    asl
+    ora color
+    tay
+    ; pull old byte, clear some bits, replace with new bits
+    pla
+    and and_masks, x
+    ora or_masks, y
+
+update_nt_buffer_byte:
+    ldy #0
+    sta (pointer), y
+    rts
+
+solid_color_tiles:
+    ; tiles of solid color 0/1/2/3
+    db %00000000, %01010101, %10101010, %11111111
+
+and_masks:
+    db %00111111, %11001111, %11110011, %11111100
+
+or_masks:
+    db %00000000, %01000000, %10000000, %11000000
+    db %00000000, %00010000, %00100000, %00110000
+    db %00000000, %00000100, %00001000, %00001100
+    db %00000000, %00000001, %00000010, %00000011
+
+; --------------------------------------------------------------------------------------------------
 
 to_decimal_tens_tile:
     ; In: A = unsigned integer

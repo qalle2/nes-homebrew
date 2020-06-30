@@ -4,10 +4,13 @@ reset:
     lda #$00
     sta snd_chn  ; disable all sound channels
 
-    ; clear zero page
+    ; clear zero page and nt_buffer
     lda #$00
     tax
 -   sta $00, x
+    sta nt_buffer, x
+    sta nt_buffer + $100, x
+    sta nt_buffer + $200, x
     inx
     bne -
 
@@ -150,6 +153,13 @@ reset:
     jmp main_loop
 
 ; --------------------------------------------------------------------------------------------------
+
+set_vram_address:
+    ; A = high byte, X = low byte
+    bit ppu_status  ; reset latch
+    sta ppu_addr
+    stx ppu_addr
+    rts
 
 print_four_times:
     sta ppu_data

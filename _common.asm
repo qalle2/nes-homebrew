@@ -2,6 +2,8 @@
 
 ; --- Constants ------------------------------------------------------------------------------------
 
+; addresses
+
 ppu_ctrl   equ $2000
 ppu_mask   equ $2001
 ppu_status equ $2002
@@ -16,6 +18,17 @@ oam_dma  equ $4014
 snd_chn  equ $4015
 joypad1  equ $4016
 joypad2  equ $4017
+
+; joypad bitmasks
+
+button_a      = %10000000
+button_b      = %01000000
+button_select = %00100000
+button_start  = %00010000
+button_up     = %00001000
+button_down   = %00000100
+button_left   = %00000010
+button_right  = %00000001
 
 ; --- Macros ---------------------------------------------------------------------------------------
 
