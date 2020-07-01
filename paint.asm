@@ -1,3 +1,5 @@
+; Kalle Paint (NES, ASM6f)
+
     include "_common.asm"
 
     ; value to fill unused areas with
@@ -6,36 +8,42 @@
 ; --------------------------------------------------------------------------------------------------
 ; Constants
 
+; Note: in flag variables, only the MSB is significant ($00-$7f = false, $80-$ff = true).
+; Note: all address variables (2 bytes) are little endian (low byte, high byte).
+
 ; zero page
-in_palette_editor  equ $00  ; flag; MSB: 0 = paint mode, 1 = palette edit mode
-nmi_done           equ $01  ; flag; MSB: 0 = no, 1 = yes
-do_paint           equ $02  ; flag; MSB: 0 = do nothing, 1 = write new_nt_byte to vram_address
-joypad_status      equ $03
-prev_joypad_status equ $04  ; previous joypad status
-delay_left         equ $05  ; cursor move delay left
-cursor_type        equ $06  ; 0 = small (arrow), 1 = big (square)
-cursor_x           equ $07  ; cursor X position (in paint mode; 0-63)
-cursor_y           equ $08  ; cursor Y position (in paint mode; 0-47)
-color              equ $09  ; selected color (0-3)
-palette_cursor     equ $0a  ; cursor position in palette edit mode (0-3)
-user_palette       equ $0b  ; 4 bytes, each $00-$3f
-paint_area_offset  equ $11  ; 2 bytes (low, high; 0-767)
-temp               equ $13
-pointer            equ $14  ; 2 bytes
+user_palette           equ $00  ; 4 bytes (each $00-$3f)
+paint_area_offset      equ $04  ; 2 bytes (offset to nt_buffer and paint area in VRAM; $000-$2ff)
+nt_buffer_address      equ $06  ; 2 bytes (nt_buffer...nt_buffer+$2ff)
+paint_vram_address     equ $08  ; 2 bytes (ppu_paint_area_start...ppu_paint_area_start+$2ff)
+in_palette_editor      equ $0a  ; flag (in palette edit mode instead of paint mode?)
+execute_main_loop      equ $0b  ; flag (allow main loop to run once?)
+update_paint_area_vram equ $0c  ; flag (update paint area VRAM?)
+joypad_status          equ $0d  ; first joypad status (bits: A, B, select, start, up, down, left, right)
+prev_joypad_status     equ $0e  ; first joypad status on previous frame
+paint_move_delay_left  equ $0f  ; cursor move delay left (paint mode)
+paint_cursor_type      equ $10  ; cursor type (paint mode; 0=small, 1=big)
+paint_cursor_x         equ $11  ; cursor X position (paint mode; 0-63)
+paint_cursor_y         equ $12  ; cursor Y position (paint mode; 0-47)
+paint_color            equ $13  ; selected color (paint mode; 0-3)
+palette_cursor         equ $14  ; cursor position (palette edit mode; 0-3)
+temp                   equ $15  ; temporary
 
 ; other RAM
-sprite_data equ $0200  ; 256 bytes; first 9 paint mode sprites, then 13 palette editor sprites
-nt_buffer   equ $0300  ; 768 bytes; copy of name table data of paint area
+sprite_data equ $0200  ; 256 bytes (first 9 paint mode sprites, then 13 palette editor sprites)
+nt_buffer   equ $0300  ; 768 bytes (copy of name table data of paint area)
+
+; PPU
+ppu_paint_area_start equ $2080  ; $300 bytes
 
 ; colors
 black  equ $0f
 white  equ $30
 red    equ $16
 yellow equ $28
-olive  equ $18
+gray   equ $00
 green  equ $1a
 blue   equ $02
-purple equ $04
 
 ; misc
 cursor_move_delay equ 10
@@ -53,6 +61,12 @@ cursor_move_delay equ 10
     include "paint-init.asm"
     include "paint-mainloop.asm"
     include "paint-nmi.asm"
+
+; --- Subs/tables used by more than one part -------------------------------------------------------
+
+solid_color_tiles:
+    ; tiles of solid color 0/1/2/3
+    hex 00 55 aa ff
 
 ; --- Interrupt vectors ----------------------------------------------------------------------------
 
