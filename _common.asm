@@ -39,16 +39,16 @@ macro initialize_nes
     ; 30,000 cycles to do non-PPU-related stuff.
     ; See http://wiki.nesdev.com/w/index.php/Init_code
 
-    sei              ; ignore IRQs
-    cld              ; disable decimal mode
+    sei           ; ignore IRQs
+    cld           ; disable decimal mode
     ldx #$40
-    stx joypad2      ; disable APU frame IRQ
+    stx joypad2   ; disable APU frame IRQ
     ldx #$ff
-    txs              ; initialize stack pointer
-    inx              ; now X = 0
-    stx ppu_ctrl     ; disable NMI
-    stx ppu_mask     ; disable rendering
-    stx dmc_freq     ; disable DMC IRQs
+    txs           ; initialize stack pointer
+    inx
+    stx ppu_ctrl  ; disable NMI
+    stx ppu_mask  ; disable rendering
+    stx dmc_freq  ; disable DMC IRQs
 
     wait_vblank_start
 endm

@@ -113,20 +113,14 @@ enter_palette_editor:
     lda #0
     sta palette_cursor
 
-    ; hide some paint mode sprites (sprites 0-5; cursor, cursor coordinates, comma)
+    ; hide paint cursor
     lda #$ff
-    ldx #((6 - 1) * 4)
--   sta sprite_data + 0 * 4 + 0, x
-    dex
-    dex
-    dex
-    dex
-    bpl -
+    sta sprite_data + 0 * 4 + 0
 
     ; show all palette editor sprites
-    ldx #((13 - 1) * 4)
--   lda initial_sprite_data + 9 * 4, x
-    sta sprite_data + 9 * 4, x
+    ldx #((palette_editor_sprite_count - 1) * 4)
+-   lda initial_sprite_data + paint_mode_sprite_count * 4, x
+    sta sprite_data + paint_mode_sprite_count * 4, x
     dex
     dex
     dex
@@ -206,7 +200,7 @@ paint_cursor_down:
     lda paint_cursor_y
     sec
     adc paint_cursor_type
-    cmp #48
+    cmp #50
     bne store_vertical
     lda #0
     jmp store_vertical
@@ -215,7 +209,7 @@ paint_cursor_up:
     clc
     sbc paint_cursor_type
     bpl store_vertical
-    lda #48
+    lda #50
     clc
     sbc paint_cursor_type
 store_vertical:
@@ -266,9 +260,9 @@ update_paint_mode_sprite_data:
 
 get_paint_area_offset:
     ; Compute offset within name table data of paint area from paint_cursor_x and paint_cursor_y.
-    ; Bits of paint_cursor_y (0-47 or %000000-%101111): ABCDEF
-    ; Bits of paint_cursor_x (0-63 or %000000-%111111): abcdef
-    ; Bits of paint_area_offset (0-767):                000000AB CDEabcde
+    ; Bits of paint_cursor_y    (0-49):  ABCDEF
+    ; Bits of paint_cursor_x    (0-63):  abcdef
+    ; Bits of paint_area_offset (0-799): 000000AB CDEabcde
 
     ; high byte
     lda paint_cursor_y  ; 00ABCDEF
@@ -475,20 +469,14 @@ large_color_increment:
 ; --------------------------------------------------------------------------------------------------
 
 exit_palette_editor:
-    ; show paint mode sprites 0-5
-    ldx #((6 - 1) * 4)
--   lda initial_sprite_data + 0 * 4 + 0, x
-    sta sprite_data + 0 * 4 + 0, x
-    dex
-    dex
-    dex
-    dex
-    bpl -
+    ; show paint cursor
+    lda initial_sprite_data + 0 * 4 + 0
+    sta sprite_data + 0 * 4 + 0
 
     ; hide all palette editor sprites
     lda #$ff
-    ldx #((13 - 1) * 4)
--   sta sprite_data + 9 * 4, x
+    ldx #((palette_editor_sprite_count - 1) * 4)
+-   sta sprite_data + paint_mode_sprite_count * 4, x
     dex
     dex
     dex
@@ -514,7 +502,7 @@ update_palette_editor_sprite_data:
     asl
     clc
     adc #(22 * 8 - 1)
-    sta sprite_data + 9 * 4 + 0
+    sta sprite_data + paint_mode_sprite_count * 4 + 0
 
     ; 16s of color number (sprite tile)
     lda user_palette, x
@@ -524,14 +512,14 @@ update_palette_editor_sprite_data:
     lsr
     clc
     adc #10
-    sta sprite_data + (9 + 5) * 4 + 1
+    sta sprite_data + (paint_mode_sprite_count + 5) * 4 + 1
 
     ; ones of color number (sprite tile)
     lda user_palette, x
     and #$0f
     clc
     adc #$0a
-    sta sprite_data + (9 + 6) * 4 + 1
+    sta sprite_data + (paint_mode_sprite_count + 6) * 4 + 1
 
     rts
 

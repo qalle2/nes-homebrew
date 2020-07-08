@@ -43,7 +43,7 @@ Prints *Hello, World!*. Only tested on [FCEUX](http://www.fceux.com).
 ![hello.asm](hello.png)
 
 ### Kalle Paint
-A paint program. 64&times;48 "pixels", 4 colors, palette editor, 1&times;1-pixel or 2&times;2-pixel brush.
+A paint program. 64&times;50 "pixels", 4 colors, palette editor, 1&times;1-pixel or 2&times;2-pixel brush.
 
 ![paint.asm](paint.png)
 

@@ -5,14 +5,22 @@ reset:
     lda #$00
     sta snd_chn
 
-    ; clear zero page and nt_buffer
+    ; clear zero page
     lda #$00
     tax
 -   sta $00, x
-    sta nt_buffer, x
-    sta nt_buffer + $100, x
-    sta nt_buffer + $200, x
     inx
+    bne -
+
+    ; clear nt_buffer (800 = 4 * 200 bytes)
+    lda #$00
+    tax
+-   sta nt_buffer, x
+    sta nt_buffer + 200, x
+    sta nt_buffer + 400, x
+    sta nt_buffer + 600, x
+    inx
+    cpx #200
     bne -
 
     ; init user palette
@@ -58,7 +66,7 @@ reset:
 
 set_sprite_data:
     ; copy initial sprite data (paint mode, palette edit mode)
-    ldx #((9 + 13) * 4 - 1)
+    ldx #((paint_mode_sprite_count + palette_editor_sprite_count) * 4 - 1)
 -   lda initial_sprite_data, x
     sta sprite_data, x
     dex
@@ -66,7 +74,7 @@ set_sprite_data:
 
     ; hide palette editor sprites and unused sprites
     lda #$ff
-    ldx #(9 * 4)
+    ldx #(paint_mode_sprite_count * 4)
 -   sta sprite_data, x
     inx
     inx
@@ -77,18 +85,19 @@ set_sprite_data:
     rts
 
 initial_sprite_data:
-    ; paint mode (9 sprites)
-    db  0 * 8 - 1, $02, %00000000, 0 * 8   ; cursor
-    db 28 * 8 - 1, $00, %00000000, 1 * 8   ; tens of X position
-    db 28 * 8 - 1, $00, %00000000, 2 * 8   ; ones of X position
-    db 28 * 8 - 1, $00, %00000000, 5 * 8   ; tens of Y position
-    db 28 * 8 - 1, $00, %00000000, 6 * 8   ; ones of Y position
-    db 28 * 8 - 1, $04, %00000000, 3 * 8   ; comma
-    db 28 * 8 - 1, $01, %00000000, 9 * 8   ; cover 1
-    db 29 * 8 - 1, $01, %00000000, 8 * 8   ; cover 2
-    db 29 * 8 - 1, $01, %00000000, 9 * 8   ; cover 3
+    ; paint mode
+    db 0 * 8 - 1, $02, %00000000,  0 * 8   ; cursor
+    db    12 - 1, $00, %00000000, 29 * 8   ; tens of X position
+    db    12 - 1, $00, %00000000, 30 * 8   ; ones of X position
+    db    20 - 1, $00, %00000000, 29 * 8   ; tens of Y position
+    db    20 - 1, $00, %00000000, 30 * 8   ; ones of Y position
+    db    12 - 1, $1a, %00000000, 28 * 8   ; "X"
+    db    20 - 1, $1b, %00000000, 28 * 8   ; "Y"
+    db 2 * 8 - 1, $01, %00000000, 27 * 8   ; cover 1 for selected color
+    db 3 * 8 - 1, $01, %00000000, 26 * 8   ; cover 2 for selected color
+    db 3 * 8 - 1, $01, %00000000, 27 * 8   ; cover 3 for selected color
 
-    ; palette editor mode (13 sprites)
+    ; palette edit mode
     db 22 * 8 - 1, $07, %00000001, 1 * 8   ; cursor
     db 22 * 8 - 1, $08, %00000010, 2 * 8   ; selected color 0
     db 23 * 8 - 1, $09, %00000010, 2 * 8   ; selected color 1
@@ -120,7 +129,7 @@ set_palette:
 initial_palette:
     ; background
     db white, red,    green, blue    ; paint area; same as two last sprite subpalettes
-    db white, yellow, blue,  white   ; top and bottom bar
+    db white, yellow, blue,  lblue   ; top bar
     db white, white,  white, white   ; unused
     db white, white,  white, white   ; unused
     ; sprites
@@ -181,7 +190,7 @@ background_chr_data2:
 
 sprite_chr_data:
     ; 32 tiles (512 bytes)
-    incbin "paint-sprites.chr"
+    incbin "paint-sprites.bin"
 
 ; --------------------------------------------------------------------------------------------------
 
@@ -205,37 +214,27 @@ set_name_table:
     cpx #(3 * 32)
     bne -
 
-    ; paint area (24 rows)
+    ; paint area (25 rows) + bottom bar (1 row)
     lda #$00
-    ldx #(6 * 32)
+    ldx #(26 * 8)
 -   jsr print_four_times
     dex
     bne -
-
-    ; bottom bar (2 rows)
-    lda #%01010101  ; block of color 1
-    ldx #64
-    jsr print_repeatedly
 
     ; attribute table
 
     ; top bar
     lda #%01010101
-    ldx #8
+    ldx #6
     jsr print_repeatedly
+    lda #%00010101
+    sta ppu_data
+    lda #%01010101
+    sta ppu_data
 
-    ; paint area
+    ; paint area + bottom bar
     lda #%00000000
-    ldx #(6 * 8)
-    jsr print_repeatedly
-
-    ; bottom bar
-    lda #%00000101
-    sta ppu_data
-    sta ppu_data
-    ldx #%00000100
-    stx ppu_data
-    ldx #5
+    ldx #(7 * 8)
     jsr print_repeatedly
 
     rts
@@ -248,15 +247,14 @@ print_repeatedly:
     rts
 
 logo:
-    ; colors: 1 = background, 2 = foreground; 1 byte = 2*2 subpixels
-    ; bits of tile index: AaBbCcDd
-    ; corresponding subpixel colors (capital letter = MSB, small letter = LSB):
-    ; Aa Bb
-    ; Cc Dd
+    ; Output from "paint-logo-encode.py".
+    ; 32*3 bytes (tile indexes), 64*6 pixels.
+    ; 1 byte = 2*2 pixels:
+    ; - bits: AaBbCcDd
+    ; - pixels: Aa = upper left, Bb = upper right, Cc = lower left, Dd = lower right
+    ; - capital letter = MSB, small letter = LSB
 
-    hex 66 55 69 55 a5 96 55 a6 55 55 a6 55 56 a5 96  55 55  a9 a5 59 65 a5 59 55 95 55 a9 a5 59 5a 9a 59
-    hex 66 a5 59 56 a5 a6 55 66 55 55 66 55 66 a5 a5  55 55  a9 a5 55 69 a5 99 65 99 55 99 55 99 55 99 55
-    hex 65 55 65 65 a5 a5 65 a5 a5 65 a5 a5 55 a5 95  55 55  95 55 55 a5 a5 95 a5 a5 95 95 55 95 55 65 95
+    incbin "paint-logo.bin"
 
 ; --------------------------------------------------------------------------------------------------
 

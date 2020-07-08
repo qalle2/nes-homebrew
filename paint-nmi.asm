@@ -43,13 +43,13 @@ nmi:
 ; --- Paint mode -----------------------------------------------------------------------------------
 
 nmi_paint_mode:
-    ; update selected color to bottom bar (NT 0, row 28, column 8)
-    lda #$23
-    sta ppu_addr
-    lda #$88
-    sta ppu_addr
+    ; update selected color to top bar (NT 0, row 2, column 26)
     ldx paint_color
     lda solid_color_tiles, x
+    ldx #$20
+    stx ppu_addr
+    ldx #$5a
+    stx ppu_addr
     sta ppu_data
 
     ; update one byte in VRAM paint area from nt_buffer if requested by main loop

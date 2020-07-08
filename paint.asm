@@ -8,7 +8,8 @@
 ; --------------------------------------------------------------------------------------------------
 ; Constants
 
-; Note: in flag variables, only the MSB is significant ($00-$7f = false, $80-$ff = true).
+; Note: in flag variables, only the most significant bit is meaningful ($00-$7f = false, $80-$ff =
+; true).
 ; Note: all address variables (2 bytes) are little endian (low byte, high byte).
 
 ; zero page
@@ -31,22 +32,25 @@ temp                   equ $15  ; temporary
 
 ; other RAM
 sprite_data equ $0200  ; 256 bytes (first 9 paint mode sprites, then 13 palette editor sprites)
-nt_buffer   equ $0300  ; 768 bytes (copy of name table data of paint area)
+nt_buffer   equ $0300  ; 800 = $320 = 32*25 bytes (copy of name table data of paint area)
 
 ; PPU
-ppu_paint_area_start equ $2080  ; $300 bytes
+ppu_paint_area_start equ $2080  ; 800 = $320 = 32*25 bytes
 
 ; colors
 black  equ $0f
+gray   equ $00
 white  equ $30
 red    equ $16
 yellow equ $28
-gray   equ $00
 green  equ $1a
 blue   equ $02
+lblue  equ $12
 
 ; misc
-cursor_move_delay equ 10
+paint_mode_sprite_count     equ 10
+palette_editor_sprite_count equ 13
+cursor_move_delay           equ 10
 
 ; --- iNES header ----------------------------------------------------------------------------------
 

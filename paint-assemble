@@ -1,7 +1,17 @@
 # This batch file will DELETE files. Use at your own risk.
 
-rm -f paint-sprites.chr
-python3 ../nes-util/nes_chr_encode.py paint-sprites.png paint-sprites.chr
+# Encode logo
+rm -f paint-logo.bin
+python3 paint-logo-encode.py
+
+# Encode sprite CHR data
+rm -f paint-sprites.bin
+python3 ../nes-util/nes_chr_encode.py paint-sprites.png paint-sprites.bin
+
+# Assemble
 asm6f paint.asm -L paint.nes
-rm paint-sprites.chr
+
+# Delete temporary files
+rm paint-logo.bin
+rm paint-sprites.bin
 
