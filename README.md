@@ -8,14 +8,9 @@ Thanks to [pdroms.de](https://pdroms.de) for archiving some of these programs.
 * Install **asm6f**:
   * [GitHub page](https://github.com/freem/asm6f)
   * [64-bit Windows binary](http://qallee.net/misc/asm6f-win64.zip) (compiled by me)
-* Either run the Linux script `assemble` or assemble manually: `asm6f file.asm file.nes`
+* Assemble: `asm6f file.asm file.nes`
 
 ## The programs
-
-### 24 Balls
-Shows 24 bouncing balls.
-
-![24balls.asm](snap/24balls.png)
 
 ### Clock
 A 24-hour 7-segment clock. NTSC/PAL support.
@@ -24,6 +19,8 @@ A 24-hour 7-segment clock. NTSC/PAL support.
 
 ### Color Squares
 Prints colored squares. On each frame, two adjacent squares trade places.
+
+Does not work at the moment.
 
 ![colorsquares.asm](snap/colorsquares.png)
 

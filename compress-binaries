@@ -1,6 +1,3 @@
-clear
 rm -f binaries.zip
-cd src
-7z a -mx9 -bd -bso0 ../binaries.zip *.nes
-cd ..
+7z a -mx9 -bd -bso0 binaries.zip *.nes
 
