@@ -12,15 +12,13 @@ oam_data   equ $2004
 ppu_scroll equ $2005
 ppu_addr   equ $2006
 ppu_data   equ $2007
-
-dmc_freq equ $4010
-oam_dma  equ $4014
-snd_chn  equ $4015
-joypad1  equ $4016
-joypad2  equ $4017
+dmc_freq   equ $4010
+oam_dma    equ $4014
+snd_chn    equ $4015
+joypad1    equ $4016
+joypad2    equ $4017
 
 ; joypad bitmasks
-
 button_a      = %10000000
 button_b      = %01000000
 button_select = %00100000
@@ -53,14 +51,8 @@ macro initialize_nes
     wait_vblank_start
 endm
 
-macro wait_vblank
-    ; wait until in VBlank
--   bit ppu_status
-    bpl -
-endm
-
 macro wait_vblank_start
-    ; wait until at start of VBlank
+    ; wait until start of VBlank
     bit ppu_status
 -   bit ppu_status
     bpl -

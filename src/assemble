@@ -1,0 +1,11 @@
+if (($# != 1)); then echo "Argument: file to assemble (without extension)"; exit; fi
+
+clear
+
+rm -f *.bin
+python3 ../../nes-util/nes_chr_encode.py 24balls-chr.png 24balls-chr.bin
+asm6f $1.asm $1.nes
+rm -f *.bin
+
+echo ""
+

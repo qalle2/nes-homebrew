@@ -1,6 +1,6 @@
 # nes-homebrew
 
-My 6502 assembly programs for the [Nintendo Entertainment System](http://en.wikipedia.org/wiki/Nintendo_Entertainment_System) (NES).
+My 6502 assembly programs for the [Nintendo Entertainment System](http://en.wikipedia.org/wiki/Nintendo_Entertainment_System) (NES). Only tested on [FCEUX](http://www.fceux.com). Assembled programs are in `binaries.zip`.
 
 Thanks to [pdroms.de](https://pdroms.de) for archiving some of these programs.
 
@@ -8,49 +8,44 @@ Thanks to [pdroms.de](https://pdroms.de) for archiving some of these programs.
 * Install **asm6f**:
   * [GitHub page](https://github.com/freem/asm6f)
   * [64-bit Windows binary](http://qallee.net/misc/asm6f-win64.zip) (compiled by me)
-* Either run the program's batch file (only works on Windows) or assemble manually: `asm6f file.asm file.nes`
+* Either run the Linux script `assemble` or assemble manually: `asm6f file.asm file.nes`
 
 ## The programs
-Assembled programs are in `binaries.zip`.
 
 ### 24 Balls
 Shows 24 bouncing balls.
 
-Files:
-* `24balls.asm`: old version (assembled file is identical to the version I created in early 2010s)
-* `24balls-new.asm`: new version (uses about 900 bytes of PRG ROM)
-
-![24balls.asm](24balls.png)
+![24balls.asm](snap/24balls.png)
 
 ### Clock
 A 24-hour 7-segment clock. NTSC/PAL support.
 
-![clock.asm](clock.png)
+![clock.asm](snap/clock.png)
 
 ### Color Squares
 Prints colored squares. On each frame, two adjacent squares trade places.
 
-![colorsquares.asm](colorsquares.png)
+![colorsquares.asm](snap/colorsquares.png)
 
 ### Gradient Demo
 Prints an animated gradient and moving text. Warning: you may get a seizure.
 
-![gradient.asm](gradient.png)
+![gradient.asm](snap/gradient.png)
 
 ### Hello World
-Prints *Hello, World!*. Only tested on [FCEUX](http://www.fceux.com).
+Prints *Hello, World!*.
 
-![hello.asm](hello.png)
+![hello.asm](snap/hello.png)
 
 ### KHS-NES-Brainfuck
 A Brainfuck interpreter. The programs can use 256 bytes of RAM. Spaces are for readability only.
 
-![brainfuck.asm](brainfuck.png)
+![brainfuck.asm](snap/brainfuck.png)
 
 ### Trans flag
 89 bytes (including interrupt vectors and CHR data).
 
-![transflag.asm](transflag.png)
+![transflag.asm](snap/transflag.png)
 
 The complete program in hexadecimal:
 ```
@@ -68,3 +63,4 @@ ca d0 fa 88 10 f2 a9 0a 8d 01 20 00 01 02 00 02
 * [NESDev Wiki &ndash; PPU registers](http://wiki.nesdev.com/w/index.php/PPU_registers)
 * [Wikipedia &ndash; Brainfuck](https://en.wikipedia.org/wiki/Brainfuck)
 * [Esolang &ndash; Brainfuck](https://esolangs.org/wiki/Brainfuck)
+

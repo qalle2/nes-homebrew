@@ -1,5 +1,6 @@
-# This batch file will DELETE files. Use at your own risk.
-
+clear
 rm -f binaries.zip
-7z a -mx9 binaries.zip *.nes
+cd src
+7z a -mx9 -bd -bso0 ../binaries.zip *.nes
+cd ..
 
