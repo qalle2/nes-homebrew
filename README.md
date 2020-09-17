@@ -17,13 +17,6 @@ A 24-hour 7-segment clock. NTSC/PAL support.
 
 ![clock.asm](snap/clock.png)
 
-### Color Squares
-Prints colored squares. On each frame, two adjacent squares trade places.
-
-Does not work at the moment.
-
-![colorsquares.asm](snap/colorsquares.png)
-
 ### Gradient Demo
 Prints an animated gradient and moving text. Warning: you may get a seizure.
 
