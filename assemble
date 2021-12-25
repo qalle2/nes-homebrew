@@ -1,6 +1,0 @@
-if (($# != 1)); then echo "Argument: file to assemble (without extension)"; exit; fi
-
-cd src
-asm6f $1.asm ../$1.nes
-cd ..
-

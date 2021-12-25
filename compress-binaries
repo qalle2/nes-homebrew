@@ -1,3 +1,0 @@
-rm -f binaries.zip
-7z a -mx9 -bd -bso0 binaries.zip *.nes
-
