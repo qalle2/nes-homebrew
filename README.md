@@ -8,6 +8,11 @@ Thanks to [pdroms.de](https://pdroms.de) for archiving some of these programs.
 
 ## The programs
 
+### Hello World
+Prints *Hello, World!*.
+
+![hello.asm](hello.png)
+
 ### Trans flag
 Shows a transgender flag.
 Note: this program is heavily optimized for size; it does not represent good programming practice.
@@ -26,12 +31,6 @@ A 24-hour 7-segment clock. NTSC/PAL support.
 Prints an animated gradient and moving text. Warning: you may get a seizure.
 
 ![gradient.asm](gradient.png)
-
-### Hello World
-**This program does not assemble with ASM6 at the moment.**
-Prints *Hello, World!*.
-
-![hello.asm](hello.png)
 
 ### KHS-NES-Brainfuck
 **This program does not assemble with ASM6 at the moment.**

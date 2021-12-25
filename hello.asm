@@ -1,153 +1,124 @@
-    ; the byte to fill unused parts with
-    fillvalue $ff
+; Prints "Hello, World!" (NES, ASM6)
 
-    ; some PPU registers
-    ppu_control equ $2000
-    ppu_mask    equ $2001
-    ppu_status  equ $2002
-    ppu_scroll  equ $2005
-    ppu_address equ $2006
-    ppu_data    equ $2007
+; --- Constants -----------------------------------------------------------------------------------
 
-    ; colors
-    bgcolor equ $34  ; pink
-    fgcolor equ $02  ; blue
+; memory-mapped registers
+ppuctrl     equ $2000
+ppumask     equ $2001
+ppustatus   equ $2002
+ppuscroll   equ $2005
+ppuaddr     equ $2006
+ppudata     equ $2007
+dmcfreq     equ $4010
+sndchn      equ $4015
+joypad2     equ $4017
 
-macro set_vram_address address
-    ; Set the VRAM address.
-    ; Clobbers A.
-    lda #>(address)
-    sta ppu_address
-    if >(address) <> <(address)
-        lda #<(address)
-    endif
-    sta ppu_address
-endm
+; colors
+bgcolor     equ $34  ; background (pink)
+fgcolor     equ $02  ; foreground (blue)
 
-macro set_scroll_position horizontal, vertical
-    ; Set the scroll position.
-    ; Clobbers A.
-    lda #(horizontal)
-    sta ppu_scroll
-    if (horizontal) <> (vertical)
-        lda #(vertical)
-    endif
-    sta ppu_scroll
-endm
+; --- iNES header ---------------------------------------------------------------------------------
 
-; --------------------------------------------------------------------------------------------------
-; Directives regarding the iNES header
+            ; see https://wiki.nesdev.org/w/index.php/INES
+            base $0000
+            db "NES", $1a            ; file id
+            db 1, 1                  ; 16 KiB PRG ROM, 8 KiB CHR ROM
+            db %00000000, %00000000  ; NROM mapper, horizontal name table mirroring
+            pad $0010, $00           ; unused
 
-    inesprg 1  ; PRG ROM size: 1 * 16 KiB
-    ineschr 1  ; CHR ROM size: 1 * 8 KiB
-    inesmir 0  ; name table mirroring: horizontal
-    inesmap 0  ; mapper: 0 (NROM)
+; --- Main program --------------------------------------------------------------------------------
 
-; --------------------------------------------------------------------------------------------------
-; The main program
+            base $c000  ; last 16 KiB of CPU memory space
 
-    org $c000  ; the last 16 KiB of CPU memory space
+reset       ; initialize the NES; see https://wiki.nesdev.org/w/index.php/Init_code
+            sei             ; ignore IRQs
+            cld             ; disable decimal mode
+            ldx #%01000000
+            stx joypad2     ; disable APU frame IRQ
+            ldx #$ff
+            txs             ; initialize stack pointer
+            inx
+            stx ppuctrl     ; disable NMI
+            stx ppumask     ; disable rendering
+            stx dmcfreq     ; disable DMC IRQs
+            stx sndchn      ; disable sound channels
 
-reset:
-    ; initialize the NES
-    sei              ; ignore IRQs
-    cld              ; disable decimal mode
-    ldx #%01000000
-    stx $4017        ; disable APU frame IRQ
-    ldx #$ff
-    txs              ; initialize stack pointer
-    inx              ; now X = 0
-    stx ppu_control  ; disable NMI
-    stx ppu_mask     ; disable rendering
-    stx $4010        ; disable DMC IRQs
+            bit ppustatus  ; wait until next VBlank starts
+-           bit ppustatus
+            bpl -
+-           bit ppustatus  ; wait until next VBlank starts
+            bpl -
 
-    ; wait for start of VBlank
-    bit ppu_status  ; read to clear VBlank flag
--   bit ppu_status
-    bpl -
+            lda #$3f      ; set palette (VRAM $3f00-$3f01; do this while still in VBlank to avoid
+            sta ppuaddr   ; glitches)
+            lda #$00
+            sta ppuaddr
+            lda #bgcolor
+            sta ppudata
+            lda #fgcolor
+            sta ppudata
 
-    ; wait for start of VBlank again
--   bit ppu_status
-    bpl -
+            lda #$20     ; clear 1st Name Table and Attribute Table
+            sta ppuaddr  ; (VRAM $2000-$23ff, 4*256 bytes)
+            lda #$00
+            sta ppuaddr
+            ldy #4
+            tax
+-           sta ppudata
+            inx
+            bne -
+            dey
+            bne -
 
-    ; clear the first Name Table and Attribute Table (1024 = 4*256 bytes)
-    set_vram_address $2000
-    ldy #4
-    tax
--   sta ppu_data
-    inx
-    bne -
-    dey
-    bne -
+            lda #$20     ; copy text to 1st Name Table starting from 2nd column on 3rd row
+            sta ppuaddr  ; (VRAM $2041)
+            lda #$41
+            sta ppuaddr
+            ldx #0
+-           lda text,x
+            bmi +        ; exit if terminator ($80-$ff)
+            sta ppudata
+            inx
+            jmp -
 
-    ; copy the text from ROM to VRAM
-    set_vram_address $2000 + 2 * $20 + 1  ; first Name Table, row 2, column 1
-    ldx #0
--   lda text,x
-    bmi +            ; exit if terminator ($80-$ff)
-    sta ppu_data
-    inx
-    jmp -
-+
++           bit ppustatus  ; reset ppuaddr/ppuscroll latch
+            lda #$00       ; reset VRAM address
+            sta ppuaddr
+            sta ppuaddr
+            sta ppuscroll
+            sta ppuscroll
 
-    ; wait for start of VBlank, for the third time
-    bit ppu_status
--   bit ppu_status
-    bpl -
+            bit ppustatus  ; wait until next VBlank starts (to avoid glitches when enabling
+-           bit ppustatus  ; background rendering)
+            bpl -
 
-    ; set the palette
-    set_vram_address $3f00
-    lda #bgcolor     ; background color
-    sta ppu_data
-    lda #fgcolor     ; the first foreground color of the first subpalette
-    sta ppu_data
+            lda #%00001010  ; enable background rendering
+            sta ppumask
 
-    ; read ppu_status to reset the ppu_address/ppu_scroll latch
-    bit ppu_status
-    ; reset the VRAM address
-    set_vram_address $0000
-    set_scroll_position 0, 0
+-           jmp -  ; infinite loop
 
-    ; enable background rendering
-    lda #%00001010
-    sta ppu_mask
+text        hex 01 04 05 05 06 08 00 02 06 07 05 03 09  ; "Hello, World!" (see CHR ROM)
+            hex 80                                      ; terminator ($80-$ff)
 
-    ; an infinite loop
--   jmp -
+; --- Interrupt vectors ---------------------------------------------------------------------------
 
-; --------------------------------------------------------------------------------------------------
-; Data tables
+            pad $10000-6, $ff       ; end of CPU memory space
+            dw $ffff, reset, $ffff  ; NMI (unused), reset, IRQ (unused)
 
-text:
-    ; tiles $00-$09 = " HWdelor,!"
-    db $01, $04, $05, $05, $06, $08, $00  ; "Hello, "
-    db $02, $06, $07, $05, $03, $09       ; "World!"
-    ; value $80-$ff = terminator
-    db $80
+; --- CHR ROM -------------------------------------------------------------------------------------
 
-; --------------------------------------------------------------------------------------------------
-; Interrupt vectors
+            base $0000
 
-    pad $10000 - 6  ; the last 6 bytes of the PRG ROM
+            ; 16 bytes/tile; 8 bytes/bitplane (first low, then high); byte = 8*1 pixels
+            hex  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  ; $00: " "
+            hex  c6 c6 c6 fe c6 c6 c6 00  00 00 00 00 00 00 00 00  ; $01: "H"
+            hex  c6 c6 c6 d6 d6 d6 6c 00  00 00 00 00 00 00 00 00  ; $02: "W"
+            hex  06 06 06 7e c6 ce 76 00  00 00 00 00 00 00 00 00  ; $03: "d"
+            hex  00 00 7c c6 fc c0 7e 00  00 00 00 00 00 00 00 00  ; $04: "e"
+            hex  30 30 30 30 30 30 18 00  00 00 00 00 00 00 00 00  ; $05: "l"
+            hex  00 00 7c c6 c6 c6 7c 00  00 00 00 00 00 00 00 00  ; $06: "o"
+            hex  00 00 de e0 c0 c0 c0 00  00 00 00 00 00 00 00 00  ; $07: "r"
+            hex  00 00 00 00 00 18 18 30  00 00 00 00 00 00 00 00  ; $08: ","
+            hex  18 18 18 18 18 00 18 00  00 00 00 00 00 00 00 00  ; $09: "!"
 
-    dw $ffff  ; NMI (unused)
-    dw reset  ; reset
-    dw $ffff  ; IRQ (unused)
-
-; --------------------------------------------------------------------------------------------------
-; CHR ROM
-
-    base $0000
-
-    hex   00 00 00 00 00 00 00 00   00 00 00 00 00 00 00 00   ; $00: " "
-    hex   c6 c6 c6 fe c6 c6 c6 00   00 00 00 00 00 00 00 00   ; $01: "H"
-    hex   c6 c6 c6 d6 d6 d6 6c 00   00 00 00 00 00 00 00 00   ; $02: "W"
-    hex   06 06 06 7e c6 ce 76 00   00 00 00 00 00 00 00 00   ; $03: "d"
-    hex   00 00 7c c6 fc c0 7e 00   00 00 00 00 00 00 00 00   ; $04: "e"
-    hex   30 30 30 30 30 30 18 00   00 00 00 00 00 00 00 00   ; $05: "l"
-    hex   00 00 7c c6 c6 c6 7c 00   00 00 00 00 00 00 00 00   ; $06: "o"
-    hex   00 00 de e0 c0 c0 c0 00   00 00 00 00 00 00 00 00   ; $07: "r"
-    hex   00 00 00 00 00 18 18 30   00 00 00 00 00 00 00 00   ; $08: ","
-    hex   18 18 18 18 18 00 18 00   00 00 00 00 00 00 00 00   ; $09: "!"
-
-    pad $2000
+            pad $2000, $ff
