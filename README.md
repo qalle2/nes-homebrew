@@ -13,31 +13,31 @@ Shows a transgender flag.
 Note: this program is heavily optimized for size; it does not represent good programming practice.
 The actual size is 97 bytes (including interrupt vectors and CHR data).
 
-![transflag.asm](snap/transflag.png)
+![transflag.asm](transflag.png)
 
 ### Clock
 **This program does not assemble with ASM6 at the moment.**
 A 24-hour 7-segment clock. NTSC/PAL support.
 
-![clock.asm](snap/clock.png)
+![clock.asm](clock.png)
 
 ### Gradient Demo
 **This program does not assemble with ASM6 at the moment.**
 Prints an animated gradient and moving text. Warning: you may get a seizure.
 
-![gradient.asm](snap/gradient.png)
+![gradient.asm](gradient.png)
 
 ### Hello World
 **This program does not assemble with ASM6 at the moment.**
 Prints *Hello, World!*.
 
-![hello.asm](snap/hello.png)
+![hello.asm](hello.png)
 
 ### KHS-NES-Brainfuck
 **This program does not assemble with ASM6 at the moment.**
 A Brainfuck interpreter. The programs can use 256 bytes of RAM. Spaces are for readability only.
 
-![brainfuck.asm](snap/brainfuck.png)
+![brainfuck.asm](brainfuck.png)
 
 References:
 * [Wikipedia &ndash; Brainfuck](https://en.wikipedia.org/wiki/Brainfuck)
