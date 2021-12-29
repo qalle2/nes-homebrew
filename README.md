@@ -8,6 +8,13 @@ Thanks to [pdroms.de](https://pdroms.de) for archiving some of these programs.
 
 ## The programs
 
+### Gradient Demo
+Prints an animated gradient and moving text.
+Warning: you may get a seizure.
+The CHR ROM data is in `gradient-chr.bin.gz`.
+
+![gradient.asm](gradient.png)
+
 ### Hello World
 Prints *Hello, World!*.
 
@@ -25,12 +32,6 @@ The actual size is 97 bytes (including interrupt vectors and CHR data).
 A 24-hour 7-segment clock. NTSC/PAL support.
 
 ![clock.asm](clock.png)
-
-### Gradient Demo
-**This program does not assemble with ASM6 at the moment.**
-Prints an animated gradient and moving text. Warning: you may get a seizure.
-
-![gradient.asm](gradient.png)
 
 ### KHS-NES-Brainfuck
 **This program does not assemble with ASM6 at the moment.**
