@@ -28,7 +28,7 @@ fgcolor     equ $02  ; foreground (blue)
 
 ; --- Main program --------------------------------------------------------------------------------
 
-            base $c000  ; last 16 KiB of CPU memory space
+            base $c000      ; last 16 KiB of CPU memory space
 
 reset       ; initialize the NES; see https://wiki.nesdev.org/w/index.php/Init_code
             sei             ; ignore IRQs
