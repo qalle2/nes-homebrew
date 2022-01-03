@@ -41,6 +41,9 @@ A 24-hour 7-segment clock. NTSC/PAL support.
 
 ![clock.asm](clock.png)
 
+### Video
+Plays a short video clip.
+
 ### Hello World
 Prints *Hello, World!*.
 
