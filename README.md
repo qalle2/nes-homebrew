@@ -42,7 +42,9 @@ A 24-hour 7-segment clock. NTSC/PAL support.
 ![clock.asm](clock.png)
 
 ### Video
-Plays a short video clip.
+Plays a short video of Doom gameplay (NES, ASM6).
+
+![video.asm](video.png)
 
 ### Hello World
 Prints *Hello, World!*.

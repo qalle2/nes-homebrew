@@ -1,9 +1,14 @@
-; plays a short video (NES, ASM6)
+; plays a short video of Doom gameplay (NES, ASM6)
 ; 32*24 tiles (64*48 "pixels"), 4 colors, 40 frames, 10 fps
+; while one name table is being shown, the program copies 32*4 tiles/frame to another name table
+; style:
+; - indentation of instructions: 12 spaces
+; - maximum length of identifiers: 11 characters
+; - indentation of inline comments: uniform within a sub
 
 ; --- iNES header ---------------------------------------------------------------------------------
 
-; see https://wiki.nesdev.org/w/index.php/INES
+            ; see https://wiki.nesdev.org/w/index.php/INES
             base $0000
             db "NES", $1a            ; file id
             db 2, 1                  ; 32 KiB PRG ROM, 8 KiB CHR ROM
@@ -12,38 +17,60 @@
 
 ; --- Constants -----------------------------------------------------------------------------------
 
-ntdata_ptr  equ $00  ; 2 bytes; read pointer to name table data
-counter_lo  equ $02  ; 0-5
-counter_hi  equ $03  ; 0-39
-temp        equ $04
+; RAM
+vram_buffer equ $00    ; 128 bytes; name table data to copy during VBlank
+ntdata_ptr  equ $80    ; 2 bytes; read pointer to name table data (low byte first)
+ppuaddr_mir equ $82    ; 2 bytes; mirror of ppu_addr (low byte first)
+ppuctrl_mir equ $84    ; mirror of ppu_ctrl
+counter_lo  equ $85    ; 0-5
+counter_hi  equ $86    ; 0 to (frame_count - 1)
+run_main    equ $87    ; if negative, allow main loop to run once
 
+; memory-mapped registers
 ppu_ctrl    equ $2000
 ppu_mask    equ $2001
 ppu_status  equ $2002
+ppu_scroll  equ $2005
 ppu_addr    equ $2006
 ppu_data    equ $2007
+dmc_freq    equ $4010
+snd_ctrl    equ $4015
+joypad2     equ $4017
 
-; --- Main program --------------------------------------------------------------------------------
+frame_count equ 40     ; number of complete frames
 
-            base $8000
+; --- Initialization ------------------------------------------------------------------------------
 
-reset       lda #$00
-            sta ppu_ctrl
-            sta ppu_mask
+            base $8000  ; last 32 KiB of CPU memory space
 
-            bit ppu_status  ; wait for start of VBlank
+reset       ; initialize the NES; see https://wiki.nesdev.org/w/index.php/Init_code
+            sei              ; ignore IRQs
+            cld              ; disable decimal mode
+            ldx #%01000000
+            stx joypad2      ; disable APU frame IRQ
+            ldx #$ff
+            txs              ; initialize stack pointer
+            inx
+            stx ppu_ctrl     ; disable NMI
+            stx ppu_mask     ; disable rendering
+            stx dmc_freq     ; disable DMC IRQs
+            stx snd_ctrl     ; disable sound channels
+
+            bit ppu_status   ; wait until next VBlank starts
 -           bit ppu_status
             bpl -
 
-            lda #$00
+            lda #0           ; reset counters, let main loop run once
             sta counter_lo
             sta counter_hi
+            sec
+            ror run_main
 
-            bit ppu_status  ; wait for start of VBlank
+            bit ppu_status   ; wait until next VBlank starts
 -           bit ppu_status
             bpl -
 
-            lda #$3f       ; set palette
+            lda #$3f         ; set palette (while we're still in VBlank)
             sta ppu_addr
             ldx #$00
             stx ppu_addr
@@ -53,115 +80,107 @@ reset       lda #$00
             cpx #4
             bne -
 
-            lda #$20      ; clear Name and Attribute Table 0 and 1
+            lda #$20         ; clear Name and Attribute Tables (VRAM $2000-$27ff)
             sta ppu_addr
             lda #$00
             sta ppu_addr
-            tax
--           jsr write4
-            jsr write4
+            ldy #8
+--          tax
+-           sta ppu_data
             inx
             bne -
+            dey
+            bne --
 
-            lda #$00      ; clear PPU address
+            lda #$00         ; clear PPU address
             sta ppu_addr
             sta ppu_addr
 
-            bit ppu_status  ; wait for start of VBlank
+            bit ppu_status   ; wait until next VBlank starts
 -           bit ppu_status
             bpl -
 
-            lda #%10000000  ; enable NMI, show background
+            lda #%10000000   ; enable NMI, show background
             sta ppu_ctrl
             lda #%00001010
             sta ppu_mask
 
--           jmp -
+            jmp main_loop
 
-palette     hex 0f 07 27 30  ; black, brown, yellow, white
+palette     hex 0f 12 22 30  ; black, dark blue, light blue, white
 
-; --- Interrupt routines --------------------------------------------------------------------------
+; --- Main loop -----------------------------------------------------------------------------------
 
-            align $100, $ff
+main_loop   bit run_main        ; wait until NMI routine has set flag
+            bpl main_loop
 
-nmi         ; note: there are $300 tiles/bytes for each step of counter_hi and $80 bytes for each
-            ; step of counter_lo
-
-            lda counter_lo  ; counter_lo >> 1 -> temp (0/1/2)
+            ; ntdata_ptr = ntdata + counter_hi * $300 + counter_lo * $80
+            lda counter_lo      ; ntdata_ptr = counter_lo << 7
             lsr a
-            sta temp
-
-            ; set name table data pointer
-            lda counter_hi    ; high byte: >ntdata + counter_hi * 3 + (counter_lo >> 1)
-            asl a
-            adc counter_hi
-            adc temp
-            adc #>ntdata
             sta ntdata_ptr+1
-            lda counter_lo    ; low byte: (counter_lo & 1) << 7
-            and #%00000001
-            lsr a
+            lda #$00
             ror a
             sta ntdata_ptr+0
+            lda counter_hi      ; push counter_hi * 3 and clear carry
+            asl a
+            adc counter_hi
+            pha
+            lda #<ntdata        ; ntdata_ptr += ntdata + ((pulled byte) << 8)
+            adc ntdata_ptr+0
+            sta ntdata_ptr+0
+            pla
+            adc #>ntdata
+            adc ntdata_ptr+1
+            sta ntdata_ptr+1
 
-            ; TODO: clean up from here on
+            ldy #0              ; copy 128 bytes (4 rows) of name table (video) data to buffer
+-           lda (ntdata_ptr),y  ; (NMI routine can read it faster from there)
+            sta vram_buffer,y
+            iny
+            bpl -
 
-            ; set PPU address
-            lda counter_hi  ; high byte: $20 | ((~counter_hi & 1) << 2) | (counter_lo >> 1)
-            eor #%00000001  ; ($20/$21/$22/$24/$25/$26)
+            ; ppuaddr_mir = $2060 + (counter_hi & 1) * $0400 + counter_lo * $80;
+            lda counter_hi      ; high byte: $20 | ((counter_hi & 1) << 2) | (counter_lo >> 1)
             and #%00000001
             asl a
             asl a
-            ora temp
+            asl a
+            ora counter_lo
+            lsr a
             ora #%00100000
-            sta ppu_addr
-            lda counter_lo  ; low byte: ((counter_lo & 1) << 7) | $60 (= $60/$e0)
+            sta ppuaddr_mir+1
+            lda counter_lo      ; low byte: $60 | ((counter_lo & 1) << 7)
             and #%00000001
             lsr a
             ror a
             ora #%01100000
-            sta ppu_addr
+            sta ppuaddr_mir+0
 
-            ; copy 128 bytes (4 rows of tiles)
-            ldy #0
--           lda (ntdata_ptr),y
-            sta ppu_data
-            iny
-            bpl -
-
-            lda #$00
-            sta ppu_addr
-            sta ppu_addr
-
-            ; which name table to show
-            ldx counter_lo
+            ldx counter_lo      ; increment counters
             ldy counter_hi
             inx
             cpx #6
             bne +
             ldx #0
             iny
-            cpy #40
+            cpy #frame_count
             bne +
             ldy #0
 +           stx counter_lo
             sty counter_hi
-            lda counter_hi
-            and #%00000001
+
+            lda counter_hi      ; which name table to show
+            and #%00000001      ; (1 on even complete frames, 0 on odd complete frames)
+            eor #%00000001
             ora #%10000000
-            sta ppu_ctrl
+            sta ppuctrl_mir
 
-            rti
+            lsr run_main        ; clear flag
+            jmp main_loop
 
-write4      sta ppu_data
-            sta ppu_data
-            sta ppu_data
-            sta ppu_data
-            rts
-
-            align $100, $ff
-
-ntdata      ; 40 frames * 24 rows * 32 columns = 30,720 tiles (bytes)
+ntdata      ; name table (video) data
+            ; IIRC, I copied this from some video on https://tasvideos.org
+            ; frame_count frames * 24 rows/frame * 32 tiles/row (tile = byte)
 
             ; frame 0
             hex 5555555555555555555555555555555555555555555555555555555555555555
@@ -1203,15 +1222,51 @@ ntdata      ; 40 frames * 24 rows * 32 columns = 30,720 tiles (bytes)
             hex aaaaaaaaaa9a9a555aaaaa9a9aaa55efaf55aeaaaa5aaa55aaaabaaaaa956a99
             hex aaf5faeaaabae9a5aae5aaf6fae944b6e911aaeafaba9955a5aaeaa9a555b595
 
-            pad ntdata+40*24*32, $ff
+            pad ntdata+frame_count*24*32, $ff
+
+; --- Interrupt routines --------------------------------------------------------------------------
+
+            align $100, $ff    ; don't want the copy loop to cross a page boundary
+
+nmi         pha                ; push A, X (note: not Y)
+            txa
+            pha
+
+            bit ppu_status     ; clear ppu_addr/ppu_scroll latch and set PPU address
+            lda ppuaddr_mir+1
+            sta ppu_addr
+            lda ppuaddr_mir+0
+            sta ppu_addr
+
+            ldx #0             ; copy 128 bytes (4 rows) of video data to name table
+-           lda vram_buffer,x  ; TODO: is there enough VBlank time?
+            sta ppu_data
+            inx
+            bpl -
+
+            lda #$00           ; reset PPU address
+            sta ppu_addr
+            sta ppu_addr
+
+            lda ppuctrl_mir    ; which name table to show
+            sta ppu_ctrl
+
+            sec                ; set flag to let main loop run once
+            ror run_main
+
+            pla                ; pull X, A
+            tax
+            pla
+
+irq         rti                ; end of interrupt routines (note: IRQ unused)
 
 ; --- Interrupt vectors ---------------------------------------------------------------------------
 
             pad $fffa, $ff
-            dw nmi, reset, $0000  ; note: IRQ unused
+            dw nmi, reset, irq  ; note: IRQ unused
 
 ; --- CHR ROM -------------------------------------------------------------------------------------
 
             pad $10000, $ff
-            incbin "video-chr.bin"
+            incbin "video-chr.bin"  ; all combinations of 2*2 "pixels" in 4 colors
             pad $12000, $ff
