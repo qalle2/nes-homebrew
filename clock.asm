@@ -16,8 +16,7 @@ mode            equ $07  ; 0 = set time, 1 = clock running
 cursor_pos      equ $08  ; cursor position in "set time" mode
 joypad_stat     equ $09  ; joypad status
 prevjoystat     equ $0a  ; previous joypad status
-show_unlit      equ $0b  ; show unlit segments? (0 = no, 1 = yes)
-temp            equ $0c
+temp            equ $0b
 
 ; memory-mapped registers
 ppu_ctrl        equ $2000
@@ -177,11 +176,7 @@ adjustment_mode ; joypad 1 status -> A, X (bits: A, B, select, start, up, down, 
                 bcs increment_digit
                 lsr
                 bcs start_clock
-                lsr
-                lsr
-                bcc +
-                jmp toggle_unlit_segment_color
-+               jmp button_read_done
+                jmp button_read_done
 
 cursor_right    ldx cursor_pos
                 jsr hide_cursor
@@ -246,20 +241,6 @@ start_clock     ; start clock if hour is 23 or smaller
                 jsr hide_cursor
                 ; switch to "clock running" mode
                 inc mode
-                jmp button_read_done
-
-toggle_unlit_segment_color
-                ; toggle color of unlit segments
-                lda show_unlit
-                eor #%00000001
-                sta show_unlit
-                tax
-                lda #>($3f00+1)
-                sta ppu_addr
-                lda #<($3f00+1)
-                sta ppu_addr
-                lda unlitcolors,x
-                sta ppu_data
 
 button_read_done
                 lda joypad_stat
@@ -396,7 +377,9 @@ print_digits    ; print the digit segments (2*1 tiles per round; each digit is 2
 
 ; --- Arrays --------------------------------------------------------------------------------------
 
-palette         db color_bg, color_bg, color_lit, color_bg  ; initial palette (for all subpalettes)
+                ; initial palette (for all subpalettes)
+                ; note: to hide unlit segments, replace "color_unlit" with "color_bg"
+palette         db color_bg, color_unlit, color_lit, color_bg
 
 colonaddrlo     db 5*32+11  ; low bytes of colon addresses
                 db 5*32+18
@@ -415,8 +398,6 @@ plus1mod3       db 1, 2, 0
 plus1mod4       db 1, 2, 3, 0
 plus1mod6       db 1, 2, 3, 4, 5, 0
 plus1mod10      db 1, 2, 3, 4, 5, 6, 7, 8, 9, 0
-
-unlitcolors     db color_bg, color_unlit  ; colors of unlit segments
 
 segment_addresses_low
                 ; tens of hour

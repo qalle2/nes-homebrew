@@ -51,7 +51,6 @@ A 24-hour 7-segment clock.
 Buttons:
 * left/right: move cursor
 * up/down: adjust digit
-* B: toggle visibility of unlit segments
 * start: start the clock
 
 ### Video
