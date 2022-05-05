@@ -1,17 +1,26 @@
 # nes-homebrew
 
-Programs for the [Nintendo Entertainment System](http://en.wikipedia.org/wiki/Nintendo_Entertainment_System) (NES).
-They can be assembled with [ASM6](https://www.romhacking.net/utilities/674/).
-Thanks to [pdroms.de](https://pdroms.de) for archiving some of these programs.
+Programs for the [NES](https://en.wikipedia.org/wiki/Nintendo_Entertainment_System).
+Thanks to [PDRoms](https://pdroms.de) for archiving some of these programs.
+
+Table of contents:
+* [Files for each program](#files-for-each-program)
+* [The programs](#the-programs)
+  * [Gradient Demo](#gradient-demo)
+  * [Qalle's Brainfuck](#qalle's-brainfuck)
+  * [Clock](#clock)
+  * [Video](#video)
+  * [Hello World](#hello-world)
+  * [Transgender flag](#transgender-flag)
 
 ## Files for each program
 
-* `FOO.nes.gz`: assembled iNES ROM
-* `FOO.asm`: 6502/ASM6 source code
-* `FOO-chr.bin.gz`: raw CHR ROM data (needed if you want to assemble the program yourself)
-* `FOO-chr.png`: CHR ROM data as an image (can be encoded with `nes_chr_encode.py` in my [NES utilities](https://github.com/qalle2/nes-util))
-* `FOO.png`: screenshot
-* `FOO-assemble.sh`: a script that assembles the program (warning: do not run it before reading it)
+* `example.asm`: source code (assembles with [ASM6](https://www.romhacking.net/utilities/674/))
+* `example-assemble.sh`: Linux script that assembles the program (warning: deletes files)
+* `example-chr.bin.gz`: raw CHR ROM data (gzip compressed)
+* `example-chr.png`: CHR ROM data as an image (can be encoded with `nes_chr_encode.py` in my [NES utilities](https://github.com/qalle2/nes-util))
+* `example.nes.gz`: assembled program (iNES format, gzip compressed)
+* `example.png`: screenshot
 
 ## The programs
 
