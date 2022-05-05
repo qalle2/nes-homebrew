@@ -7,7 +7,7 @@ Table of contents:
 * [Files for each program](#files-for-each-program)
 * [The programs](#the-programs)
   * [Gradient Demo](#gradient-demo)
-  * [Qalle's Brainfuck](#qalle's-brainfuck)
+  * [Qalle's Brainfuck](#qalles-brainfuck)
   * [Clock](#clock)
   * [Video](#video)
   * [Hello World](#hello-world)
@@ -49,7 +49,7 @@ A 24-hour 7-segment clock. NTSC/PAL support.
 ![clock.asm](clock.png)
 
 ### Video
-Plays a short video of Doom gameplay.
+Plays a short video of Doom gameplay (64&times;48 pixels, 4 colors, 10 fps, no audio).
 
 ![video.asm](video.png)
 
