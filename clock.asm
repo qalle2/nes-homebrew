@@ -17,8 +17,7 @@ cursor_pos      equ $08  ; cursor position in "set time" mode
 joypad_stat     equ $09  ; joypad status
 prevjoystat     equ $0a  ; previous joypad status
 show_unlit      equ $0b  ; show unlit segments? (0 = no, 1 = yes)
-timing          equ $0c  ; 0 = NTSC, 1 = PAL
-temp            equ $0d
+temp            equ $0c
 
 ; memory-mapped registers
 ppu_ctrl        equ $2000
@@ -128,7 +127,6 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
 
                 ldx #0
                 jsr print_cursor
-                jsr print_ntsc_pal_text
                 jsr print_digits
 
                 bit ppu_status  ; wait until next VBlank starts
@@ -183,9 +181,6 @@ adjustment_mode ; joypad 1 status -> A, X (bits: A, B, select, start, up, down, 
                 lsr
                 bcc +
                 jmp toggle_unlit_segment_color
-+               lsr
-                bcc +
-                jmp toggle_ntsc_pal
 +               jmp button_read_done
 
 cursor_right    ldx cursor_pos
@@ -246,17 +241,7 @@ start_clock     ; start clock if hour is 23 or smaller
                 lda #%10111111
                 sta $4003
                 jmp button_read_done
-+               ; hide NTSC/PAL text
-                lda #>($2000+10*32+6)
-                sta ppu_addr
-                lda #<($2000+10*32+6)
-                sta ppu_addr
-                lda #$00
-                ldx #4
--               sta ppu_data
-                dex
-                bne -
-                ; hide cursor
++               ; hide cursor
                 ldx cursor_pos
                 jsr hide_cursor
                 ; switch to "clock running" mode
@@ -275,13 +260,6 @@ toggle_unlit_segment_color
                 sta ppu_addr
                 lda unlitcolors,x
                 sta ppu_data
-                jmp button_read_done
-
-toggle_ntsc_pal ; toggle between NTSC and PAL timing
-                lda timing
-                eor #%00000001
-                sta timing
-                jsr print_ntsc_pal_text
 
 button_read_done
                 lda joypad_stat
@@ -292,26 +270,11 @@ button_read_done
 run_mode        jsr print_digits
 
                 ; length of second in frames -> temp
-
-                lda timing  ; 0 = NTSC, 1 = PAL
-                bne pal_timing
                 ; NTSC timing: 60 fps plus an extra frame every 10 seconds (60.1 fps);
                 ; should be 60.0988 frames/s according to NESDev wiki
                 lda #60
                 sta temp
                 lda second_ones
-                bne +
-                inc temp
-                jmp +
-                ;
-pal_timing      ; PAL timing: 50 fps plus an extra frame every 120 seconds (50.0083 fps);
-                ; should be 50.007 fps according to NESDev wiki
-                lda #50
-                sta temp
-                lda minute_ones
-                and #%00000001
-                ora second_tens
-                ora second_ones
                 bne +
                 inc temp
 
@@ -385,24 +348,6 @@ hide_cursor     ; hide cursor from below digit specified by X (0-5)
                 sta ppu_data
                 rts
 
-print_ntsc_pal_text
-                ; print "NTSC" or "PAL "
-                lda timing
-                asl
-                asl
-                tax
-                lda #>($2000+10*32+6)
-                sta ppu_addr
-                lda #<($2000+10*32+6)
-                sta ppu_addr
-                ldy #4
--               lda ntscpaltext,x
-                sta ppu_data
-                inx
-                dey
-                bne -
-                rts
-
 print_digits    ; print the digit segments (2*1 tiles per round; each digit is 2*4 tiles)
                 ldy #(digit_count*4-1)  ; counts to 0
 -               lda #>($2000+8*32)
@@ -464,9 +409,6 @@ cursoradrlo     db 32+6     ; low bytes of cursor addresses
                 db 32+16
                 db 32+20
                 db 32+23
-
-ntscpaltext     hex 07 08 09 0a  ; "NTSC"
-                hex 0b 0c 0d 00  ; "PAL "
 
 max_digits      db 2+1, 9+1, 5+1, 9+1, 5+1, 9+1  ; maximum values of digits, plus 1
 plus1mod3       db 1, 2, 0

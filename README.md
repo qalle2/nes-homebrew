@@ -44,9 +44,15 @@ References:
 * [Esolang &ndash; Brainfuck](https://esolangs.org/wiki/Brainfuck)
 
 ### Clock
-A 24-hour 7-segment clock. NTSC/PAL support.
+A 24-hour 7-segment clock.
 
 ![clock.asm](clock.png)
+
+Buttons:
+* left/right: move cursor
+* up/down: adjust digit
+* B: toggle visibility of unlit segments
+* start: start the clock
 
 ### Video
 Plays a short video of Doom gameplay (64&times;48 pixels, 4 colors, 10 fps, no audio).
