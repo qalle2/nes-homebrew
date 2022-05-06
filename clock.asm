@@ -1,21 +1,23 @@
-; Clock (NES, ASM6)
+; Clock (NES, NTSC, ASM6)
 ; TODO:
-; - allow stopping the clock
+; - store & write segments vertically instead of horizontally to save VBlank time?
 ; - make each digit 3*5 tiles?
 
 ; --- Constants -----------------------------------------------------------------------------------
 
+; note: "segment tile pair buffer" = which segment pairs to draw on next VBlank
+
 ; RAM
-digits          equ $00    ; digits of time (6 bytes, from tens of hour to ones of minute)
-frame_counter   equ $06    ; count frames in 1 second (0-60)
-program_mode    equ $07    ; 0 = set time, 1 = clock running
-cursor_pos      equ $08    ; cursor position in "set time" mode (under which digit; 0-5)
-pad_status      equ $09    ; joypad status
-prev_pad_status equ $0a    ; previous joypad status
-run_main_loop   equ $0b    ; main loop allowed to run? (MSB: 0=no, 1=yes)
-fps             equ $0c    ; frames per second (60/61)
-temp            equ $0d    ; temporary
-segment_buffer  equ $80    ; segments to draw on next NMI (6*2*4 = 48 = $30 bytes)
+seg_buf_left    equ $00    ; segment tile pair buffer - left  tiles (6*4 = 24 = $18 bytes)
+seg_buf_right   equ $18    ; segment tile pair buffer - right tiles (6*4 = 24 = $18 bytes)
+digits          equ $30    ; digits of time (6 bytes, from tens of hour to ones of minute)
+program_mode    equ $36    ; 0 = adjust mode, 1 = run mode
+pad_status      equ $37    ; joypad status
+prev_pad_status equ $38    ; previous joypad status
+run_main_loop   equ $39    ; main loop allowed to run? (MSB: 0=no, 1=yes)
+cursor_pos      equ $3a    ; cursor position (0-5)
+frame_counter   equ $3b    ; frames left in current second (0-61)
+temp            equ $3c    ; temporary
 sprite_data     equ $0200  ; OAM page ($100 bytes)
 
 ; memory-mapped registers
@@ -38,6 +40,9 @@ color_dim       equ $18  ; dim        (dark yellow)
 color_bright    equ $28  ; bright     (yellow)
 color_unused    equ $30  ; unused     (white)
 
+tile_dot        equ $01  ; dot (in colons)
+tile_cursor     equ $02  ; cursor (up arrow)
+
 ; --- iNES header ---------------------------------------------------------------------------------
 
                 ; see https://wiki.nesdev.org/w/index.php/INES
@@ -50,7 +55,7 @@ color_unused    equ $30  ; unused     (white)
 ; --- Initialization ------------------------------------------------------------------------------
 
                 base $c000              ; start of PRG ROM
-                pad $f800, $ff          ; last 2 KiB of CPU address space
+                pad $fc00, $ff          ; last 1 KiB of CPU address space
 
 reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/Init_code
                 sei                     ; ignore IRQs
@@ -121,11 +126,11 @@ set_ppu_addr    sty ppu_addr            ; set PPU address from Y and A
                 rts
 
 init_spr_data   ; initial sprite data (Y, tile, attributes, X)
-                db $66-1, $01, %00000000, $5c  ; #0: top    dot between hour   & minute
-                db $74-1, $01, %00000000, $5c  ; #1: bottom dot between hour   & minute
-                db $66-1, $01, %00000000, $94  ; #2: top    dot between minute & second
-                db $74-1, $01, %00000000, $94  ; #3: bottom dot between minute & second
-                db $88-1, $02, %00000000, $34  ; #4: cursor
+                db $66-1, tile_dot,    %00000000, $5c  ; #0: top    dot between hour   & minute
+                db $74-1, tile_dot,    %00000000, $5c  ; #1: bottom dot between hour   & minute
+                db $66-1, tile_dot,    %00000000, $94  ; #2: top    dot between minute & second
+                db $74-1, tile_dot,    %00000000, $94  ; #3: bottom dot between minute & second
+                db $88-1, tile_cursor, %00000000, $34  ; #4: cursor
 
 palette         db color_unused, color_bright, color_dim, color_bg  ; backwards to all subpalettes
 
@@ -136,63 +141,7 @@ main_loop       bit run_main_loop       ; wait until NMI routine has set flag
                 ;
                 lsr run_main_loop       ; clear flag
 
-                ; copy from segment_tiles to segment_buffer (2*1 tiles/round, 2*4 tiles/digit)
-                ldy #(6*4-1)            ; Y = tile pair index
-                ;
--               tya                     ; source index: A = ((digits[Y>>2] << 2) | (Y&3)) << 1
-                lsr a
-                lsr a
-                tax
-                lda digits,x
-                asl a
-                asl a
-                sta temp
-                tya
-                and #%00000011
-                ora temp
-                asl a
-                ;
-                pha                     ; segment_buffer[Y*2] = segment_tiles[sourceIndex]
-                tax
-                clc
-                jsr copy_seg_tile
-                ;
-                pla                     ; segment_buffer[Y*2+1] = segment_tiles[sourceIndex+1]
-                tax
-                inx
-                sec
-                jsr copy_seg_tile
-                ;
-                dey
-                bpl -
-
-                lda program_mode        ; run mode-specific code
-                beq main_adj_mode
-                jmp main_run_mode
-
-copy_seg_tile   lda segment_tiles,x     ; segment_buffer[Y*2+C] = segment_tiles[X]
-                pha
-                tya
-                rol a
-                tax
-                pla
-                sta segment_buffer,x
-                rts
-
-segment_tiles   hex 06 09  0b 0d  15 17  1c 1f  ; "0"
-                hex 00 07  00 0d  00 17  00 1d  ; "1"
-                hex 04 09  0a 0f  16 18  1c 1e  ; "2"
-                hex 04 09  0a 0f  14 19  1a 1f  ; "3"
-                hex 05 07  0c 0f  14 19  00 1d  ; "4"
-                hex 06 08  0c 0e  14 19  1a 1f  ; "5"
-                hex 06 08  0c 0e  16 19  1c 1f  ; "6"
-                hex 06 09  0b 0d  00 17  00 1d  ; "7"
-                hex 06 09  0c 0f  16 19  1c 1f  ; "8"
-                hex 06 09  0c 0f  14 19  1a 1f  ; "9"
-
-; --- Main loop - adjustment mode -----------------------------------------------------------------
-
-main_adj_mode   lda pad_status          ; store previous joypad status
+                lda pad_status          ; store previous joypad status
                 sta prev_pad_status
                 ;
                 lda #1                  ; read joypad
@@ -205,7 +154,77 @@ main_adj_mode   lda pad_status          ; store previous joypad status
                 rol pad_status
                 bcc -
 
-                lda prev_pad_status     ; ignore buttons if something was pressed on last frame
+                ; copy from segment_tiles to segment buffers (2*1 tiles/round, 2*4 tiles/digit)
+                ; note: 6502 has LDA/STA zp,x but no LDA/STA zp,y; using X as destination index
+                ; instead of as temporary variable saves 1 byte
+                ;
+                ldx #(6*4-1)            ; X = tile pair index
+                ;
+-               txa                     ; source index: Y = ((digits[Y>>2] << 2) | (Y&3)) << 1
+                lsr a
+                lsr a
+                tay
+                lda digits,y            ; lose 1 byte because there's no LDA zp,y...
+                asl a
+                asl a
+                sta temp
+                txa
+                and #%00000011
+                ora temp
+                asl a
+                tay
+                ;
+                lda segment_tiles+0,y
+                sta seg_buf_left,x      ; ...but save 2 bytes because there is STA zp,x
+                lda segment_tiles+1,y
+                sta seg_buf_right,x
+                ;
+                dex
+                bpl -
+
+                lda program_mode        ; run mode-specific code
+                beq main_adj_mode
+                jmp main_run_mode
+
+segment_tiles   ; In each digit, segments (A-G) correspond to tile slots (grid, 0-7) like this:
+                ;   +-----+-----+
+                ;   |  AAA|AAA  |
+                ; 0 |  AAA|AAA  | 1
+                ;   |BB   |   CC|
+                ;   +-----+-----+
+                ;   |BB   |   CC|
+                ; 2 |BB   |   CC| 3
+                ;   |  DDD|DDD  |
+                ;   +-----+-----+
+                ;   |  DDD|DDD  |
+                ; 4 |EE   |   FF| 5
+                ;   |EE   |   FF|
+                ;   +-----+-----+
+                ;   |EE   |   FF|
+                ; 6 |  GGG|GGG  | 7
+                ;   |  GGG|GGG  |
+                ;   +-----+-----+
+                ;
+                ; Tiles allowed in each tile slot (in addition to 00 or blank tile):
+                ;     0: 04-06; 1: 07-09; 2: 0a-0c; 3: 0d-0f
+                ;     4: 14-16; 5: 17-19; 6: 1a-1c; 7: 1d-1f
+                ;
+                ;    0  1  2  3  4  5  6  7  <- tile slot
+                ;   -- -- -- -- -- -- -- --
+                hex 06 09 0b 0d 15 17 1c 1f  ; "0"
+                hex 00 07 00 0d 00 17 00 1d  ; "1"
+                hex 04 09 0a 0f 16 18 1c 1e  ; "2"
+                hex 04 09 0a 0f 14 19 1a 1f  ; "3"
+                hex 05 07 0c 0f 14 19 00 1d  ; "4"
+                hex 06 08 0c 0e 14 19 1a 1f  ; "5"
+                hex 06 08 0c 0e 16 19 1c 1f  ; "6"
+                hex 06 09 0b 0d 00 17 00 1d  ; "7"
+                hex 06 09 0c 0f 16 19 1c 1f  ; "8"
+                hex 06 09 0c 0f 14 19 1a 1f  ; "9"
+
+; --- Main loop - adjust mode ---------------------------------------------------------------------
+
+main_adj_mode   lda prev_pad_status     ; ignore buttons if something was pressed on last frame
                 bne buttons_done
 
                 ldx cursor_pos          ; react to buttons
@@ -256,6 +275,8 @@ start_clock     lda digits+0            ; start clock if hour <= 23
                 bcs buttons_done
 +               lda #$ff                ; hide cursor sprite
                 sta sprite_data+4*4+0
+                lda #60                 ; restart current second
+                sta frame_counter
                 inc program_mode        ; switch to "clock running" mode
 
 buttons_done    ldx cursor_pos          ; update cursor sprite X
@@ -263,75 +284,50 @@ buttons_done    ldx cursor_pos          ; update cursor sprite X
                 sta sprite_data+4*4+3
                 jmp main_loop           ; return to common main loop
 
-max_digits      db 2, 9, 5, 9, 5, 9     ; maximum values of digits
-
 cursor_x        hex 34 4c 6c 84 a4 bc   ; cursor sprite X positions
 
 ; --- Main loop - run mode ------------------------------------------------------------------------
 
-main_run_mode   ; length of second in frames -> fps
-                ; 60.1 on average (60 + an extra frame every 10 seconds)
-                ; should be 60.0988 according to NESDev wiki
-                lda #60
-                sta fps
-                lda digits+5
+main_run_mode   dec frame_counter       ; count down; if zero, a second has elapsed
+                bne digit_incr_done
+
+                lda #60                 ; reinitialize frame_counter
+                sta frame_counter       ; 60.1 on average (60 + an extra frame every 10 seconds)
+                lda digits+5            ; should be 60.0988 according to NESDev wiki
                 bne +
-                inc fps
-
-+               ; increment digits
-
                 inc frame_counter
-                lda frame_counter
-                cmp fps
-                bne digit_incr_done
 
-                lda #0
-                sta frame_counter
-
-                ldx digits+5            ; ones of second
-                lda plus1_mod10,x
-                sta digits+5
-                bne digit_incr_done
-
-                ldx digits+4            ; tens of second
-                lda plus1_mod6,x
-                sta digits+4
-                bne digit_incr_done
-
-                ldx digits+3            ; ones of minute
-                lda plus1_mod10,x
-                sta digits+3
-                bne digit_incr_done
-
-                ldx digits+2            ; tens of minute
-                lda plus1_mod6,x
-                sta digits+2
-                bne digit_incr_done
-
-                ldx digits+1            ; ones of hour
++               ldx #5                  ; increment digits (X = which digit)
+-               cpx #1                  ; special logic: reset ones of hour if hour = 23
+                bne +
                 lda digits+0
                 cmp #2
+                bne +
+                lda digits+1
+                cmp #3
+                beq ++
++               inc digits,x            ; the usual logic
+                lda max_digits,x
+                cmp digits,x
+                bcs digit_incr_done
+++              lda #0
+                sta digits,x
+                dex
+                bpl -
+
+digit_incr_done lda prev_pad_status     ; if nothing pressed on previous frame and start pressed
+                bne +                   ; on this frame...
+                lda pad_status
+                and #%00010000
                 beq +
-                lda plus1_mod10,x
-                jmp ++
-+               lda plus1_mod4,x
-++              sta digits+1
-                bne digit_incr_done
+                ;
+                lda init_spr_data+4*4   ; show cursor
+                sta sprite_data+4*4+0
+                dec program_mode        ; switch to adjustment mode
 
-                ldx digits+0            ; tens of hour
-                lda plus1_mod3,x
-                sta digits+0
++               jmp main_loop           ; return to common main loop
 
-digit_incr_done jmp main_loop           ; return to common main loop
-
-plus1_mod3      db 1, 2, 0
-plus1_mod4      db 1, 2, 3, 0
-plus1_mod6      db 1, 2, 3, 4, 5, 0
-plus1_mod10     db 1, 2, 3, 4, 5, 6, 7, 8, 9, 0
-
-; --- NMI routine - common ------------------------------------------------------------------------
-
-                align $100, $ff
+; --- Interrupt routines --------------------------------------------------------------------------
 
 nmi             pha                     ; push A, X, Y
                 txa
@@ -347,22 +343,19 @@ nmi             pha                     ; push A, X, Y
 
                 ; print digit segments from segment buffer
                 ; (2*1 tiles per round; each digit is 2*4 tiles)
-                ldy #(6*4-1)            ; counts to 0 in steps of -1
-                ldx #((6*4-1)*2)        ; counts to 0 in steps of -2
+                ldx #(6*4-1)
                 ;
--               lda #$21
+-               lda #$21                ; set VRAM address
                 sta ppu_addr
-                lda segment_addr_lo,y
+                lda segment_addr_lo,x
                 sta ppu_addr
-                dey
                 ;
-                lda segment_buffer+0,x  ; print tile pair
+                lda seg_buf_left,x      ; print tile pair
                 sta ppu_data
-                lda segment_buffer+1,x
+                lda seg_buf_right,x
                 sta ppu_data
-                dex
-                dex
                 ;
+                dex
                 bpl -
 
                 sec                     ; set flag to let main loop run once
@@ -376,9 +369,9 @@ nmi             pha                     ; push A, X, Y
                 tax
                 pla
 
-                rti
+irq             rti                     ; note: IRQ unused
 
-segment_addr_lo ; low bytes of segment addresses
+segment_addr_lo ; low bytes of VRAM addresses of first bytes of segment tile pairs
                 ; notes:
                 ; - digits are a half tile left of centerline (total width is odd)
                 ; - digits are one    tile top  of centerline (to fit all on same VRAM page)
@@ -389,7 +382,7 @@ segment_addr_lo ; low bytes of segment addresses
                 db 4*32+20, 5*32+20, 6*32+20, 7*32+20  ; tens of second
                 db 4*32+23, 5*32+23, 6*32+23, 7*32+23  ; ones of second
 
-; --- Subs used in many places --------------------------------------------------------------------
+; --- Subs & arrays used in many places -----------------------------------------------------------
 
 set_ppu_regs    lda #$00                ; reset PPU scroll
                 sta ppu_scroll
@@ -400,19 +393,14 @@ set_ppu_regs    lda #$00                ; reset PPU scroll
                 sta ppu_mask
                 rts
 
+max_digits      db 2, 9, 5, 9, 5, 9     ; maximum values of digits
+
 ; --- Interrupt vectors ---------------------------------------------------------------------------
 
                 pad $fffa, $ff
-                dw nmi, reset, 0
+                dw nmi, reset, irq      ; note: IRQ unused
 
 ; --- CHR ROM -------------------------------------------------------------------------------------
-
-                ; tiles in pattern table 0:
-                ; $00: blank
-                ; $01: dot
-                ; $02: cursor
-                ; $04-$0f, $14-$1f: segments
-                ; all other tiles are unused
 
                 pad $10000, $ff
                 incbin "clock-chr.bin"

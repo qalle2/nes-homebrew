@@ -44,14 +44,22 @@ References:
 * [Esolang &ndash; Brainfuck](https://esolangs.org/wiki/Brainfuck)
 
 ### Clock
-A 24-hour 7-segment clock.
+A 24-hour 7-segment clock. Runs at 60.1 frames per second.
 
 ![clock.asm](clock.png)
 
-Buttons:
-* left/right: move cursor
-* up/down: adjust digit
-* start: start the clock
+There are two modes:
+* adjust mode:
+  * program starts in this mode
+  * time does not advance
+  * cursor (up arrow) is visible
+  * press left/right to move cursor
+  * press up/down to change digit at cursor
+  * press start to switch to run mode (hour must be 23 or less)
+* run mode:
+  * time advances
+  * cursor is hidden
+  * press start to switch to adjust mode
 
 ### Video
 Plays a short video of Doom gameplay (64&times;48 pixels, 4 colors, 10 fps, no audio).
