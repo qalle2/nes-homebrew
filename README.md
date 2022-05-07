@@ -61,6 +61,8 @@ There are two modes:
   * cursor is hidden
   * press start to switch to adjust mode
 
+The actual size (PRG + CHR ROM) is less than 1.5 KiB.
+
 ### Video
 Plays a short video of Doom gameplay (64&times;48 pixels, 4 colors, 10 fps, no audio).
 

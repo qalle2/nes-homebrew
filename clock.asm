@@ -121,15 +121,11 @@ wait_vbl_start  bit ppu_status          ; wait until next VBlank starts
                 bpl -
                 rts
 
-set_ppu_addr    sty ppu_addr            ; set PPU address from Y and A
-                sta ppu_addr
-                rts
-
 init_spr_data   ; initial sprite data (Y, tile, attributes, X)
                 db $66-1, tile_dot,    %00000000, $5c  ; #0: top    dot between hour   & minute
-                db $74-1, tile_dot,    %00000000, $5c  ; #1: bottom dot between hour   & minute
+                db $73-1, tile_dot,    %00000000, $5c  ; #1: bottom dot between hour   & minute
                 db $66-1, tile_dot,    %00000000, $94  ; #2: top    dot between minute & second
-                db $74-1, tile_dot,    %00000000, $94  ; #3: bottom dot between minute & second
+                db $73-1, tile_dot,    %00000000, $94  ; #3: bottom dot between minute & second
                 db $88-1, tile_cursor, %00000000, $34  ; #4: cursor
 
 palette         db color_unused, color_bright, color_dim, color_bg  ; backwards to all subpalettes
@@ -156,7 +152,7 @@ main_loop       bit run_main_loop       ; wait until NMI routine has set flag
 
                 ; copy from segment_tiles to segment buffers (2*1 tiles/round, 2*4 tiles/digit)
                 ; note: 6502 has LDA/STA zp,x but no LDA/STA zp,y; using X as destination index
-                ; instead of as temporary variable saves 1 byte
+                ; and Y as temporary variable instead of vice versa saves 1 byte
                 ;
                 ldx #(6*4-1)            ; X = tile pair index
                 ;
@@ -164,7 +160,7 @@ main_loop       bit run_main_loop       ; wait until NMI routine has set flag
                 lsr a
                 lsr a
                 tay
-                lda digits,y            ; lose 1 byte because there's no LDA zp,y...
+                lda digits,y
                 asl a
                 asl a
                 sta temp
@@ -175,7 +171,7 @@ main_loop       bit run_main_loop       ; wait until NMI routine has set flag
                 tay
                 ;
                 lda segment_tiles+0,y
-                sta seg_buf_left,x      ; ...but save 2 bytes because there is STA zp,x
+                sta seg_buf_left,x
                 lda segment_tiles+1,y
                 sta seg_buf_right,x
                 ;
@@ -292,7 +288,7 @@ cursor_x        hex 34 4c 6c 84 a4 bc   ; cursor sprite X positions
 main_run_mode   dec frame_counter       ; count down; if zero, a second has elapsed
                 bne digit_incr_done
 
-                lda #60                 ; reinitialize frame_counter
+                lda #60                 ; reinitialize frame counter
                 sta frame_counter       ; 60.1 on average (60 + an extra frame every 10 seconds)
                 lda digits+5            ; should be 60.0988 according to NESDev wiki
                 bne +
@@ -307,8 +303,8 @@ main_run_mode   dec frame_counter       ; count down; if zero, a second has elap
                 lda digits+1
                 cmp #3
                 beq ++
-+               inc digits,x            ; the usual logic
-                lda max_digits,x
++               inc digits,x            ; the usual logic: increment digit; if too large, zero it
+                lda max_digits,x        ; and continue to next digit, otherwise exit
                 cmp digits,x
                 bcs digit_incr_done
 ++              lda #0
@@ -316,15 +312,14 @@ main_run_mode   dec frame_counter       ; count down; if zero, a second has elap
                 dex
                 bpl -
 
-digit_incr_done lda prev_pad_status     ; if nothing pressed on previous frame and start pressed
-                bne +                   ; on this frame...
-                lda pad_status
+digit_incr_done lda prev_pad_status     ; if nothing pressed on previous frame
+                bne +
+                lda pad_status          ; and start pressed on this frame
                 and #%00010000
                 beq +
-                ;
-                lda init_spr_data+4*4   ; show cursor
+                lda init_spr_data+4*4   ; then show cursor
                 sta sprite_data+4*4+0
-                lsr clock_running       ; clear flag
+                lsr clock_running       ; and clear flag
 
 +               jmp main_loop           ; return to common main loop
 
@@ -337,26 +332,20 @@ nmi             pha                     ; push A, X, Y
                 pha
 
                 bit ppu_status          ; reset ppu_scroll/ppu_addr latch
-
                 lda #$00                ; do sprite DMA
                 sta oam_addr
                 lda #>sprite_data
                 sta oam_dma
 
-                ; print digit segments from segment buffer
-                ; (2*1 tiles per round; each digit is 2*4 tiles)
+                ; print digit segments from buffer (2*1 tiles/round, 2*4 tiles/digit)
+                ldy #$21                ; VRAM address high
                 ldx #(6*4-1)
-                ;
--               lda #$21                ; set VRAM address
-                sta ppu_addr
-                lda segment_addr_lo,x
-                sta ppu_addr
-                ;
+-               lda segment_addr_lo,x   ; set VRAM address
+                jsr set_ppu_addr
                 lda seg_buf_left,x      ; print tile pair
                 sta ppu_data
                 lda seg_buf_right,x
                 sta ppu_data
-                ;
                 dex
                 bpl -
 
@@ -386,6 +375,10 @@ segment_addr_lo ; low bytes of VRAM addresses of first bytes of segment tile pai
 
 ; --- Subs & arrays used in many places -----------------------------------------------------------
 
+set_ppu_addr    sty ppu_addr            ; set PPU address from Y and A
+                sta ppu_addr
+                rts
+
 set_ppu_regs    lda #$00                ; reset PPU scroll
                 sta ppu_scroll
                 sta ppu_scroll
@@ -404,6 +397,7 @@ max_digits      db 2, 9, 5, 9, 5, 9     ; maximum values of digits
 
 ; --- CHR ROM -------------------------------------------------------------------------------------
 
-                pad $10000, $ff
+                base $0000
                 incbin "clock-chr.bin"
-                pad $12000, $ff
+                pad $0200, $ff          ; 512 bytes should be enough for anybody
+                pad $2000, $ff
