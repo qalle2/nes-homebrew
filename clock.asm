@@ -11,10 +11,10 @@
 seg_buf_left    equ $00    ; segment tile pair buffer - left  tiles (6*4 = 24 = $18 bytes)
 seg_buf_right   equ $18    ; segment tile pair buffer - right tiles (6*4 = 24 = $18 bytes)
 digits          equ $30    ; digits of time (6 bytes, from tens of hour to ones of minute)
-program_mode    equ $36    ; 0 = adjust mode, 1 = run mode
-pad_status      equ $37    ; joypad status
-prev_pad_status equ $38    ; previous joypad status
-run_main_loop   equ $39    ; main loop allowed to run? (MSB: 0=no, 1=yes)
+clock_running   equ $36    ; is clock running? (MSB: 0=no, 1=yes)
+run_main_loop   equ $37    ; is main loop allowed to run? (MSB: 0=no, 1=yes)
+pad_status      equ $38    ; joypad status
+prev_pad_status equ $39    ; previous joypad status
 cursor_pos      equ $3a    ; cursor position (0-5)
 frame_counter   equ $3b    ; frames left in current second (0-61)
 temp            equ $3c    ; temporary
@@ -182,8 +182,8 @@ main_loop       bit run_main_loop       ; wait until NMI routine has set flag
                 dex
                 bpl -
 
-                lda program_mode        ; run mode-specific code
-                beq main_adj_mode
+                bit clock_running       ; run mode-specific code
+                bpl main_adj_mode
                 jmp main_run_mode
 
 segment_tiles   ; In each digit, segments (A-G) correspond to tile slots (grid, 0-7) like this:
@@ -277,7 +277,8 @@ start_clock     lda digits+0            ; start clock if hour <= 23
                 sta sprite_data+4*4+0
                 lda #60                 ; restart current second
                 sta frame_counter
-                inc program_mode        ; switch to "clock running" mode
+                sec                     ; set flag
+                ror clock_running
 
 buttons_done    ldx cursor_pos          ; update cursor sprite X
                 lda cursor_x,x
@@ -323,7 +324,7 @@ digit_incr_done lda prev_pad_status     ; if nothing pressed on previous frame a
                 ;
                 lda init_spr_data+4*4   ; show cursor
                 sta sprite_data+4*4+0
-                dec program_mode        ; switch to adjustment mode
+                lsr clock_running       ; clear flag
 
 +               jmp main_loop           ; return to common main loop
 
@@ -336,6 +337,7 @@ nmi             pha                     ; push A, X, Y
                 pha
 
                 bit ppu_status          ; reset ppu_scroll/ppu_addr latch
+
                 lda #$00                ; do sprite DMA
                 sta oam_addr
                 lda #>sprite_data
