@@ -1,4 +1,4 @@
-; Gradient demo (NES, ASM6). Seizure warning.
+; 1024 Byte Gradient Demo by Qalle (NES, ASM6). Seizure warning.
 
 ; --- Constants -----------------------------------------------------------------------------------
 
@@ -12,6 +12,7 @@ direction       equ $ca    ; direction of color animation: 0=inwards, 1=outwards
 ppu_ctrl_copy   equ $ce    ; copy of ppu_ctrl
 run_main_loop   equ $d2    ; is main loop allowed to run? (MSB: 0=no, 1=yes)
 pal_src_index   equ $d6    ; start index in ROM palette (0-112 in steps of 16)
+temp            equ $da
 sine_table      equ $0200  ; $100 bytes
 
 ; memory-mapped registers
@@ -89,16 +90,47 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
                 dey
                 bpl -
 
-                ldx #(64-1)             ; generate 256-byte sine table in RAM using 64-byte table
-                ldy #0                  ; in ROM; X = 63...0, Y = 0...63
+                ; generate first 64 bytes (90 degrees) of sine table in RAM by extracting 16 bytes
+                ; (64*2 bits) of delta-coded data
+                lda #124                ; initial sine
+                sta sine_table+0
+                ldx #0                  ; X = source index / inner loop counter, Y = target index
+                ldy #0
+                ;
+--              lda sine_deltas,x       ; byte with 4 deltas -> temp
+                sta temp
+                ;
+                txa                     ; store source index
+                pha
+                ;
+                ldx #4                  ; do 4 times: get bit pair with delta,
+-               lda #0                  ; add to current sine to get next sine
+                asl temp
+                rol a
+                asl temp
+                rol a
+                adc sine_table,y        ; carry is always clear
+                iny
+                sta sine_table,y        ; BUG: index has off-by-1 error, causing a visual glitch
+                dex
+                bne -
+                ;
+                pla                     ; restore source index
+                tax
+                ;
+                inx
+                cpx #16
+                bne --
+
+                ldx #(64-1)             ; generate rest of 256-byte sine table using first 64
+                ldy #0                  ; bytes; X = 63...0, Y = 0...63
                 sec
                 ;
--               lda sine_table_rom,x
-                sta sine_table+0,x      ; 1st quarter (positive rising)
+-               lda sine_table,x
                 sta sine_table+64,y     ; 2nd quarter (positive falling)
                 ;
                 lda #(2*124)            ; negate value (124 = zero level)
-                sbc sine_table_rom,x
+                sbc sine_table,x
                 sta sine_table+128,x    ; 3rd quarter (negative falling)
                 sta sine_table+192,y    ; 4th quarter (negative rising)
                 ;
@@ -204,12 +236,13 @@ wait_vbl_start  bit ppu_status          ; wait for start of VBlank
                 bpl -
                 rts
 
-sine_table_rom  ; 64 values for angles < 90 degrees; Python 3:
-                ; ",".join(format(128-4+math.sin(i*2*math.pi/256)*100,"3.0f") for i in range(64))
-                db 124,126,129,131,134,136,139,141,144,146,148,151,153,155,158,160
-                db 162,165,167,169,171,173,175,177,180,182,184,186,187,189,191,193
-                db 195,196,198,200,201,203,204,206,207,208,210,211,212,213,214,215
-                db 216,217,218,219,220,220,221,222,222,223,223,223,224,224,224,224
+sine_deltas     ; sine table: 64 values for angles < 90 degrees; each value is a 2-bit unsigned
+                ; delta; Python 3:
+                ;   import math
+                ;   v = [round(128-4+math.sin(i*2*math.pi/256)*100) for i in range(64)]
+                ;   d = [b-a for (a,b) in zip([v[0]]+v,v)]
+                ;   bytes(d[i]*64+d[i+1]*16+d[i+2]*4+d[i+3] for i in range(0,len(d),4)).hex()
+                hex 2e ee eb ae ba aa ea 6a 9a 66 59 55 55 45 10 40
 
 write2_pt_bytes pha                     ; in: A = byte from pt_data_2bit/pt_data_1bit;
                 inx                     ; write 2 pattern table bytes using nybbles of A as
@@ -233,45 +266,41 @@ write2_pt_bytes pha                     ; in: A = byte from pt_data_2bit/pt_data
 
                 ; pattern table data (each nybble is an index to pt_data_bytes)
 pt_data_2bit    ; 2-bit tiles (16 nybbles = 1 tile)
-                hex cccccccc 00000000  ; tile $00: solid    color 1
+                hex 99999999 00000000  ; tile $00: solid    color 1
                 hex 34343434 43434343  ; tile $01: dithered color 1/2
-                hex 00000000 cccccccc  ; tile $02: solid    color 2
-                hex 43434343 cccccccc  ; tile $03: dithered color 2/3
+                hex 00000000 99999999  ; tile $02: solid    color 2
+                hex 43434343 99999999  ; tile $03: dithered color 2/3
 pt_data_2bit_end
 pt_data_1bit    ; 1-bit tiles (8 nybbles = 1st bitplane of 1 tile; 2nd bitplane will be zeroed)
-
-                hex c66c6666  ; tile $04: "A"
-                hex 555c66cc  ; tile $05: "B"
-                hex 111c66cc  ; tile $06: "D"
-                hex c55c55cc  ; tile $07: "E"
-                hex c55666cc  ; tile $08: "G"
+                hex 96696666  ; tile $04: "A"
+                hex 55596699  ; tile $05: "B"
+                hex 11196699  ; tile $06: "D"
+                hex 95595599  ; tile $07: "E"
+                hex 95566699  ; tile $08: "G"
                 hex 22222222  ; tile $09: "I"/"1"
-                hex 678bb876  ; tile $0a: "K"
-                hex 555555cc  ; tile $0b: "L"
-                hex 6ac96666  ; tile $0c: "M"
-                hex c6666666  ; tile $0d: "N"
-                hex c66666cc  ; tile $0e: "O"/"0"
-                hex c66c8766  ; tile $0f: "R"
-                hex c2222222  ; tile $10: "T"
-                hex 666cc11c  ; tile $11: "Y"
-                hex c11c55cc  ; tile $12: "Z"/"2"
-                hex 666c1111  ; tile $13: "4"
+                hex 55555599  ; tile $0a: "L"
+                hex 68976666  ; tile $0b: "M"
+                hex 96666666  ; tile $0c: "N"
+                hex 96666699  ; tile $0d: "O"/"0"
+                hex 96691111  ; tile $0e: "Q"/"9"
+                hex 95555555  ; tile $0f: "R"
+                hex 92222222  ; tile $10: "T"
+                hex 66699119  ; tile $11: "Y"
+                hex 91195599  ; tile $12: "Z"/"2"
+                hex 66691111  ; tile $13: "4"
 pt_data_1bit_end
 
 pt_data_bytes   ; actual pattern table data bytes (all tiles consist of these bytes only)
-                db %00000000  ; index $0
-                db %00000011  ; index $1
-                db %00011000  ; index $2
-                db %01010101  ; index $3
-                db %10101010  ; index $4
-                db %11000000  ; index $5
-                db %11000011  ; index $6
-                db %11000110  ; index $7
-                db %11001100  ; index $8
-                db %11011011  ; index $9
-                db %11100111  ; index $a
-                db %11111000  ; index $b
-                db %11111111  ; index $c
+                db %00000000  ; index 0
+                db %00000011  ; index 1
+                db %00011000  ; index 2
+                db %01010101  ; index 3
+                db %10101010  ; index 4
+                db %11000000  ; index 5
+                db %11000011  ; index 6
+                db %11011011  ; index 7
+                db %11100111  ; index 8
+                db %11111111  ; index 9
 
 write_nt1_row   tya                     ; write Y & %11 32 times to VRAM
                 and #%00000011
@@ -346,12 +375,12 @@ main_loop       bit run_main_loop       ; wait until NMI routine has set flag
                 jmp main_loop           ; infinite loop
 
 spr_tiles       ; tiles of sprites (note: spaces are defined in angle_changes)
-                hex 09 0e 12 13              ; "IOZ4"
+                hex 09 0d 12 13              ; "IOZ4"
                 hex 05 11 10 07              ; "BYTE"
-                hex 08 0f 04 06 09 07 0d 10  ; "GRADIENT"
-                hex 06 07 0c 0e              ; "DEMO"
+                hex 08 0f 04 06 09 07 0c 10  ; "GRADIENT"
+                hex 06 07 0b 0d              ; "DEMO"
                 hex 05 11                    ; "BY"
-                hex 0a 04 0b 0b 07           ; "KALLE"
+                hex 0e 04 0a 0a 07           ; "QALLE"
 spr_tiles_end
 
 angle_changes   ; what to subtract from (angle+64) after each letter
