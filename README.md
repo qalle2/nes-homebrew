@@ -30,6 +30,8 @@ Warning: you may get a seizure.
 
 ![gradient.asm](gradient.png)
 
+Uses CHR RAM. Actual PRG ROM size is 1 KiB.
+
 ### Qalle's Brainfuck
 A Brainfuck interpreter.
 The programs can use 256 bytes of RAM.
@@ -61,7 +63,7 @@ There are two modes:
   * cursor is hidden
   * press start to switch to adjust mode
 
-The actual size (PRG + CHR ROM) is less than 1.5 KiB.
+Actual size: PRG ROM 1 KiB, CHR ROM 512 bytes.
 
 ### Video
 Plays a short video of Doom gameplay (64&times;48 pixels, 4 colors, 10 fps, no audio).
