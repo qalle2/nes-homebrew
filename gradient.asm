@@ -90,17 +90,16 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
                 dey
                 bpl -
 
-                ; generate first 64 bytes (90 degrees) of sine table in RAM by extracting 16 bytes
+                ; generate first 64 bytes (90 degrees) of sine table in RAM from 16 bytes
                 ; (64*2 bits) of delta-coded data
-                lda #124                ; initial sine
+                lda #124                ; initial sine (will be overwritten later)
                 sta sine_table+$ff
-                ldx #0                  ; X = source index / inner loop counter, Y = target index
-                ldy #$ff
+                ldx #(16-1)             ; X = sine_deltas index / inner loop counter
+                ldy #$ff                ; Y = sine_table  index
                 ;
 --              lda sine_deltas,x       ; byte with 4 deltas -> temp
                 sta temp
-                ;
-                txa                     ; store source index
+                txa                     ; store delta index
                 pha
                 ;
                 ldx #4                  ; do 4 times: get bit pair with delta,
@@ -115,12 +114,10 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
                 dex
                 bne -
                 ;
-                pla                     ; restore source index
+                pla                     ; restore delta index
                 tax
-                ;
-                inx
-                cpx #16
-                bne --
+                dex
+                bpl --
 
                 ldx #(64-1)             ; generate rest of 256-byte sine table using first 64
                 ldy #0                  ; bytes; X = 63...0, Y = 0...63
@@ -236,13 +233,14 @@ wait_vbl_start  bit ppu_status          ; wait for start of VBlank
                 bpl -
                 rts
 
-sine_deltas     ; sine table: 64 values for angles < 90 degrees; each value is a 2-bit unsigned
-                ; delta; Python 3:
+sine_deltas     ; 16-byte sine table: 64 unsigned 2-bit delta values for angles < 90 degrees;
+                ; first delta = 2 MSBs of last byte, last delta = 2 LSBs of first byte; Python 3:
                 ;   import math
                 ;   v = [round(128-4+math.sin(i*2*math.pi/256)*100) for i in range(64)]
-                ;   d = [b-a for (a,b) in zip([v[0]]+v,v)]
-                ;   bytes(d[i]*64+d[i+1]*16+d[i+2]*4+d[i+3] for i in range(0,len(d),4)).hex()
-                hex 2e ee eb ae ba aa ea 6a 9a 66 59 55 55 45 10 40
+                ;   d = [p[1]-p[0] for p in zip([v[0]]+v,v)]
+                ;   b = bytes(d[i]*64 + d[i+1]*16 + d[i+2]*4 + d[i+3] for i in range(0,len(d),4))
+                ;   b[::-1].hex()
+                hex 40 10 45 55 55 59 66 9a 6a ea aa ba ae eb ee 2e
 
 write2_pt_bytes pha                     ; in: A = byte from pt_data_2bit/pt_data_1bit;
                 inx                     ; write 2 pattern table bytes using nybbles of A as
