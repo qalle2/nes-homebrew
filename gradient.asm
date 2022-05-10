@@ -93,9 +93,9 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
                 ; generate first 64 bytes (90 degrees) of sine table in RAM by extracting 16 bytes
                 ; (64*2 bits) of delta-coded data
                 lda #124                ; initial sine
-                sta sine_table+0
+                sta sine_table+$ff
                 ldx #0                  ; X = source index / inner loop counter, Y = target index
-                ldy #0
+                ldy #$ff
                 ;
 --              lda sine_deltas,x       ; byte with 4 deltas -> temp
                 sta temp
@@ -111,7 +111,7 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
                 rol a
                 adc sine_table,y        ; carry is always clear
                 iny
-                sta sine_table,y        ; BUG: index has off-by-1 error, causing a visual glitch
+                sta sine_table,y
                 dex
                 bne -
                 ;
