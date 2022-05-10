@@ -40,6 +40,10 @@ cl7             equ $1a  ; animated color 7
 cl8             equ $1c  ; animated color 8
 col_sprite      equ $0f  ; sprites (black)
 
+; misc
+spr_center_x    equ (128-4)      ; X position around which sprites revolve
+spr_center_y    equ (128-8-4-1)  ; Y position around which sprites revolve
+
 ; --- iNES header ---------------------------------------------------------------------------------
 
                 ; see https://wiki.nesdev.org/w/index.php/INES
@@ -92,7 +96,7 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
 
                 ; generate first 64 bytes (90 degrees) of sine table in RAM from 16 bytes
                 ; (64*2 bits) of delta-coded data
-                lda #124                ; initial sine (will be overwritten later)
+                lda #spr_center_x       ; initial sine (will be overwritten later)
                 sta sine_table+$ff
                 ldx #(16-1)             ; X = sine_deltas index / inner loop counter
                 ldy #$ff                ; Y = sine_table  index
@@ -126,7 +130,7 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
 -               lda sine_table,x
                 sta sine_table+64,y     ; 2nd quarter (positive falling)
                 ;
-                lda #(2*124)            ; negate value (124 = zero level)
+                lda #(2*spr_center_x)   ; negate value
                 sbc sine_table,x
                 sta sine_table+128,x    ; 3rd quarter (negative falling)
                 sta sine_table+192,y    ; 4th quarter (negative rising)
@@ -149,39 +153,40 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
 
                 ldx #0                  ; copy 2-bit tiles (X = source index)
 -               lda pt_data_2bit,x
-                jsr write2_pt_bytes     ; use nybbles as indexes to 2 bytes to write
+                jsr write2_pt_bytes     ; use nybbles as indexes to 2 pattern table bytes
+                inx
                 cpx #(pt_data_2bit_end-pt_data_2bit)
                 bne -
 
                 ldx #0                  ; copy 1-bit tiles (X = source index)
                 ;
---              lda pt_data_1bit,x
-                jsr write2_pt_bytes     ; use nybbles as indexes to 2 bytes to write
+-               lda pt_data_1bit,x
+                jsr write2_pt_bytes     ; use nybbles as indexes to 2 pattern table bytes
+                inx
                 ;
                 txa                     ; if X % 4 = 0, write 2nd bitplane (8 zeros)
                 and #%00000011
                 bne +
                 ldy #8
--               sta ppu_data
-                dey
-                bne -
+                jsr fill_vram           ; write A Y times
                 ;
 +               cpx #(pt_data_1bit_end-pt_data_1bit)
-                bne --
+                bne -
 
                 ldy #$20                ; prepare to write two name and attribute tables
                 lda #$00
                 jsr set_ppu_addr
 
-                ldy #30                 ; name table 0: vertical stripes, Y=row counter,
-                ;                       ; every row is the same:
---              ldx #(256-16)           ; X & %11 for X = 240...255 and 15...0
+                ldy #30                 ; name table 0: vertical stripes, Y = row counter
+                ;
+--              ldx #(256-16)           ; X & %11 for X = 240...255
 -               txa
                 and #%00000011
                 sta ppu_data
                 inx
                 bne -
-                ldx #(16-1)
+                ;
+                ldx #(16-1)             ; X & %11 for 15...0
 -               txa
                 and #%00000011
                 sta ppu_data
@@ -191,7 +196,7 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
                 dey
                 bne --
 
-                ldy #8                  ; attribute table 0: vertical stripes, Y=row counter
+                ldy #8                  ; attribute table 0: vertical stripes, Y = row counter
 --              ldx #(8-1)
 -               lda attr_data,x
                 sta ppu_data
@@ -200,25 +205,23 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
                 dey
                 bne --
 
-                ldy #0                  ; name table 1: horizontal stripes, Y=row counter,
--               jsr write_nt1_row       ; each row consists of one tile only:
-                iny                     ; Y & %11 for Y = 0...15 and 15...2
-                cpy #16
+                ldx #0                  ; name table 1: horizontal stripes, X = row counter
+-               jsr write_nt1_row       ; write (X & %11) 32 times
+                inx
+                cpx #16
                 bne -
-                dey
--               jsr write_nt1_row
-                dey
-                cpy #1
+                dex
+-               jsr write_nt1_row       ; write (X & %11) 32 times
+                dex
+                cpx #1
                 bne -
 
-                ldy #(8-1)              ; attribute table 1: horizontal stripes, Y=row counter
---              lda attr_data,y
-                ldx #8
--               sta ppu_data
+                ldx #(8-1)              ; attribute table 1: horizontal stripes, X = row counter
+-               lda attr_data,x
+                ldy #8
+                jsr fill_vram           ; write A Y times
                 dex
-                bne -
-                dey
-                bpl --
+                bpl -
 
                 jsr wait_vbl_start      ; wait for start of VBlank
 
@@ -233,20 +236,32 @@ wait_vbl_start  bit ppu_status          ; wait for start of VBlank
                 bpl -
                 rts
 
-sine_deltas     ; 16-byte sine table: 64 unsigned 2-bit delta values for angles < 90 degrees;
-                ; first delta = 2 MSBs of last byte, last delta = 2 LSBs of first byte; Python 3:
-                ;   import math
-                ;   v = [round(128-4+math.sin(i*2*math.pi/256)*100) for i in range(64)]
-                ;   d = [p[1]-p[0] for p in zip([v[0]]+v,v)]
-                ;   b = bytes(d[i]*64 + d[i+1]*16 + d[i+2]*4 + d[i+3] for i in range(0,len(d),4))
-                ;   b[::-1].hex()
-                hex 40 10 45 55 55 59 66 9a 6a ea aa ba ae eb ee 2e
+sine_deltas     ; 16-byte sine table for sprite coordinates:
+                ; 64 unsigned 2-bit delta values for angles < 90 degrees, amplitude 100
+                ; first delta = 2 MSBs of last byte, last delta = 2 LSBs of first byte
+                ; generated with gradient-sin-gen.py
+                db 1<<6 | 0<<4 | 0<<2 | 0
+                db 0<<6 | 1<<4 | 0<<2 | 0
+                db 1<<6 | 0<<4 | 1<<2 | 1
+                db 1<<6 | 1<<4 | 1<<2 | 1
+                db 1<<6 | 1<<4 | 1<<2 | 1
+                db 1<<6 | 1<<4 | 2<<2 | 1
+                db 1<<6 | 2<<4 | 1<<2 | 2
+                db 2<<6 | 1<<4 | 2<<2 | 2
+                db 1<<6 | 2<<4 | 2<<2 | 2
+                db 3<<6 | 2<<4 | 2<<2 | 2
+                db 2<<6 | 2<<4 | 2<<2 | 2
+                db 2<<6 | 3<<4 | 2<<2 | 2
+                db 2<<6 | 2<<4 | 3<<2 | 2
+                db 3<<6 | 2<<4 | 2<<2 | 3
+                db 3<<6 | 2<<4 | 3<<2 | 2
+                db 0<<6 | 2<<4 | 3<<2 | 2
 
-write2_pt_bytes pha                     ; in: A = byte from pt_data_2bit/pt_data_1bit;
-                inx                     ; write 2 pattern table bytes using nybbles of A as
-                ;                       ; indexes to pt_data_bytes; also increment X
+write2_pt_bytes ; in: A = byte from pt_data_2bit/pt_data_1bit;
+                ; write 2 pattern table bytes using nybbles of A as indexes to pt_data_bytes
                 ;
-                lsr a                   ; get 1st actual byte by high nybble
+                pha                     ; get 1st byte from high nybble
+                lsr a
                 lsr a
                 lsr a
                 lsr a
@@ -254,7 +269,7 @@ write2_pt_bytes pha                     ; in: A = byte from pt_data_2bit/pt_data
                 lda pt_data_bytes,y
                 sta ppu_data
                 ;
-                pla                     ; get 2nd actual byte by low nybble
+                pla                     ; get 2nd byte from low nybble
                 and #%00001111
                 tay
                 lda pt_data_bytes,y
@@ -300,12 +315,12 @@ pt_data_bytes   ; actual pattern table data bytes (all tiles consist of these by
                 db %11100111  ; index 8
                 db %11111111  ; index 9
 
-write_nt1_row   tya                     ; write Y & %11 32 times to VRAM
+write_nt1_row   txa                     ; write X & %11 to VRAM 32 times
                 and #%00000011
-                ldx #32
--               sta ppu_data
-                dex
-                bne -
+                ldy #32
+fill_vram       sta ppu_data            ; write A to VRAM Y times
+                dey
+                bne fill_vram
                 rts
 
 attr_data       ; attribute table data (read backwards but it's the same both ways)
@@ -351,14 +366,16 @@ main_loop       bit run_main_loop       ; wait until NMI routine has set flag
                 asl a
                 asl a
                 tax
+                ;
                 lda sine_table,y        ; sine of angle -> sprite Y position
-                sbc #(10-1-1)           ; carry is always clear
+                sbc #(spr_center_x-spr_center_y-1)  ; carry is always clear; "-1" to compensate
                 sta sprite_data+0,x
                 tya                     ; increase angle by 90 degrees (256/4)
                 adc #(64-1)             ; carry is always set
                 tay
                 lda sine_table,y        ; sine of angle -> sprite X position
                 sta sprite_data+3,x
+                ;
                 pla                     ; letter index -> X
                 tax
                 tya                     ; decrease angle for next letter (64 has been added to
