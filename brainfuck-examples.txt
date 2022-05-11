@@ -1,9 +1,12 @@
 An infinite loop:
     +[]
 
+Print all characters:
+    +[.+]
+
 Input characters (lower case letters), print them in upper case; space to quit:
     +[,>++++ [<-------->-] <.]
 
-Print *Hello, World!* and a newline (from Wikipedia):
+Print "Hello, World!" and a newline (from Wikipedia):
     ++++++++[ > ++++[ >++>+++>+++>+<<<< -] >+>+>->>+[<]< -]
     >>. >---.+++++++..+++. >>. <-. <.+++.------.--------. >>+. >++.

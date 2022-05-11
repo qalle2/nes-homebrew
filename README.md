@@ -33,9 +33,7 @@ Warning: you may get a seizure.
 Uses CHR RAM. Actual PRG ROM size is 1 KiB.
 
 ### Qalle's Brainfuck
-A Brainfuck interpreter.
-The programs can use 256 bytes of RAM.
-Spaces are for readability only.
+A Brainfuck interpreter. Under construction. The programs can use 256 bytes of RAM.
 
 ![brainfuck.asm](brainfuck.png)
 
