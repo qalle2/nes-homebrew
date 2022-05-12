@@ -1,34 +1,36 @@
 ; Qalle's Brainfuck (NES, ASM6)
 ;
-; IMPORTANT NOTE: This program is currently under construction. Some features (e.g. space) don't
-; work and the code is poorly organized. You may want to take an old version (before May 2022)
-; from Github.
+; IMPORTANT NOTE: This program is under construction and doesn't work at the moment. If necessary,
+; take an old version (before May 2022) from Github.
 ;
 ; TODO: don't read VRAM, move stuff away from NMI routine
 
 ; --- Constants -----------------------------------------------------------------------------------
 
 ; RAM
-program_mode    equ $00    ; 0 = editing, 1 = running, 2 = asking for input
-joypad_stat     equ $01    ; joypad status
-program_len     equ $02    ; length of Brainfuck program (0-255)
-pointer         equ $03    ; 2 bytes; a general-purpose pointer
-outp_buffer     equ $05    ; 1 byte; screen output buffer
-outp_buflen     equ $06    ; 0-1  ; length of screen output buffer
-output_len      equ $07    ; number of characters printed by the Brainfuck program
-keyboard_x      equ $08    ; virtual keyboard - X position (0-15)
-keyboard_y      equ $09    ; virtual keyboard - Y position (0-5)
-input_char      equ $0a    ; virtual keyboard - character (32-127)
-temp            equ $0b    ; a temporary variable
-prog_orig       equ $0200  ; Brainfuck program with spaces (255 bytes)
-brackets        equ $0400  ; target addresses of "[" and "]" (255 bytes)
-bf_ram          equ $0500  ; RAM of Brainfuck program (256 bytes)
+pointer         equ $00    ; memory pointer (2 bytes)
+program_mode    equ $02    ; 0 = editing, 1 = running, 2 = asking for input
+pad_status      equ $03    ; joypad status
+prev_pad_status equ $04    ; previous joypad status
+program_len     equ $05    ; length of Brainfuck program (0-255)
+outp_buffer     equ $06    ; 1 byte; screen output buffer
+outp_buflen     equ $07    ; 0-1  ; length of screen output buffer
+output_len      equ $08    ; number of characters printed by the Brainfuck program
+keyboard_x      equ $09    ; virtual keyboard - X position (0-15)
+keyboard_y      equ $0a    ; virtual keyboard - Y position (0-5)
+input_char      equ $0b    ; virtual keyboard - character (32-127)
+temp            equ $0c    ; a temporary variable
+run_main_loop   equ $0d    ; MSB = main loop allowed to run? (0=no, 1=yes)
+bf_program      equ $0200  ; Brainfuck program ($100 bytes)
+brackets        equ $0400  ; target addresses of "[" and "]" ($100 bytes)
+bf_ram          equ $0500  ; RAM of Brainfuck program ($100 bytes)
 sprite_data     equ $0600  ; 256 bytes
 
 ; memory-mapped registers
 ppu_ctrl        equ $2000
 ppu_mask        equ $2001
 ppu_status      equ $2002
+ppu_scroll      equ $2005
 ppu_addr        equ $2006
 ppu_data        equ $2007
 dmc_freq        equ $4010
@@ -86,13 +88,13 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
                 ldx #0                  ; clear zero page and Brainfuck code; hide all sprites
 -               lda #$00
                 sta $00,x
-                sta prog_orig,x
+                sta bf_program,x
                 lda #$ff
                 sta sprite_data,x
                 inx
                 bne -
 
-                ldx #(2*4-1)            ; initialize used sprites
+                ldx #(3*4-1)            ; initialize used sprites
 -               lda init_spr_data,x
                 sta sprite_data,x
                 dex
@@ -100,36 +102,36 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
 
                 jsr wait_vbl_start      ; wait until next VBlank starts
 
-                lda #$3f                ; set palette (while still in VBlank)
-                ldx #$00
+                ldy #$3f                ; set palette (while still in VBlank; 4*8 bytes)
+                lda #$00
                 jsr set_ppu_addr
-                ldy #8
---              ldx #(4-1)
+                ldy #4
+--              ldx #0
 -               lda palette,x
                 sta ppu_data
-                dex
-                bpl -
+                inx
+                cpx #8
+                bne -
                 dey
                 bne --
 
-                lda #$00                ; prepare to copy pattern table data
-                tax
-                jsr set_ppu_addr
+                ldy #$00                ; prepare to copy pattern table data
+                tya
+                jsr set_ppu_addr        ; Y, A -> address
                 ;
--               sta ppu_data            ; tiles $00-$1f ($200 bytes): all zeroes
-                sta ppu_data
-                inx
+-               sta ppu_data            ; fill tiles $00-$1f (VRAM $0000-$01ff) with $00
+                sta ppu_data            ; Y is still 0
+                iny
                 bne -
                 ;
-                lda #>pt_data           ; set pointer, clear Y
-                sta pointer+1
-                ldy #0
+                lda #>pt_data           ; set pointer to pattern table data array
+                sta pointer+1           ; (must be at $xx00); Y is still 0
                 sty pointer+0
                 ;
---              lda (pointer),y         ; copy byte
+--              lda (pointer),y         ; copy array to VRAM
                 sta ppu_data            ; after every   8 bytes, write 8 zeroes (2nd bitplane)
                 iny                     ; after every 256 bytes, increment high byte of pointer
-                tya
+                tya                     ; some garbage will be copied to the end
                 and #%00000111
                 bne +
                 ldx #8
@@ -146,61 +148,58 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
                 lda #>run_mode          ; set high byte of pointer
                 sta pointer+1
 
-                jmp edit_mode
+                jmp setup_edit_mode
 
-palette         db color_unused, color_unused, color_fg, color_bg  ; backwards
+palette         ; copied 4 times to PPU palette
+                db color_bg, color_fg, color_unused, color_unused
+                db color_bg, color_bg, color_unused, color_unused  ; hidden virtual keyboard
+palette_end
 
 init_spr_data   ; initial sprite data
-                db 255, $00, %00000001, 255   ; selected character in background color
-                db 255, $8a, %00000000, 255   ; a block filled with foreground color
+                db 255, '_', %00000000, 255  ; #0: edit mode - cursor
+                db 255, $00, %00000001, 255  ; #1: run mode - selected char in background color
+                db 255, $8a, %00000000, 255  ; #2: run mode - block filled with foreground color
 
-; --- Edit mode -----------------------------------------------------------------------------------
+; --- Set up edit mode ----------------------------------------------------------------------------
 
-edit_mode       lda #$00
+setup_edit_mode lda #$00
                 sta ppu_ctrl
                 sta ppu_mask
                 sta program_mode
                 sta keyboard_x
                 sta keyboard_y
 
-                ; set up name table 0 and attribute table 0
-
-                lda #$20
-                ldx #$00
-                jsr set_ppu_addr
+                ldy #$20                ; prepare to write name & attribute table 0
+                lda #$00
+                jsr set_ppu_addr        ; Y, A -> address
                 ;
                 ldx #(rle_editor_top-rle_data)  ; top part of editor
                 jsr print_rle_data
-                ldx #0                       ; Brainfuck code
--               lda prog_orig,x
+                ;
+                ldx #0                  ; Brainfuck code
+-               lda bf_program,x
                 sta ppu_data
                 inx
                 bne -
                 ;
                 ldx #(rle_editor_bot-rle_data)  ; bottom part of editor
                 jsr print_rle_data
-                lda #%00000000               ; clear attribute table
+                ;
+                lda #%00000000          ; clear attribute table
                 ldx #(8*8)
                 jsr fill_vram
-                lda #$22                     ; write cursor to name table ($5f = "_")
-                ldx program_len
-                jsr set_ppu_addr
+                ;
+                ldy #$22                ; write cursor to name table ($5f = "_")
+                lda program_len
+                jsr set_ppu_addr        ; Y, A -> address
                 lda #$5f
                 sta ppu_data
 
-                jsr reset_ppu_addr
-
-                jsr wait_vbl_start      ; wait until next VBlank starts
-
-                jmp wait_exec
+                jmp main_loop
 
 ; --- Main loop -----------------------------------------------------------------------------------
 
-wait_exec       ; wait for execution start
-                lda #%10000000          ; enable NMI
-                sta ppu_ctrl
-                lda #%00001010          ; show background
-                sta ppu_mask
+main_loop       jsr set_ppu_regs        ; set ppu_scroll/ppu_ctrl/ppu_mask
 
 -               lda program_mode        ; wait until we exit editor in NMI routine
                 beq -
@@ -214,24 +213,26 @@ wait_exec       ; wait for execution start
 
                 ; copy Brainfuck program from VRAM to RAM
 
-                lda #$22                ; first half (row 16)
-                ldx #$00
-                jsr set_ppu_addr
+                ldy #$22                ; first half (row 16)
+                lda #$00
+                jsr set_ppu_addr        ; Y, A -> address
+                tax
                 lda ppu_data
 -               lda ppu_data
-                sta prog_orig,x
+                sta bf_program,x
                 inx
                 bpl -
                 jsr reset_ppu_addr
 
                 jsr wait_vbl_start      ; wait until next VBlank starts
 
-                lda #$22                ; second half (row 20)
-                ldx #$80
-                jsr set_ppu_addr
+                ldy #$22                ; second half (row 20)
+                lda #$80
+                jsr set_ppu_addr        ; Y, A -> address
+                tax
                 lda ppu_data
 -               lda ppu_data
-                sta prog_orig,x
+                sta bf_program,x
                 inx
                 bne -
                 jsr reset_ppu_addr
@@ -240,7 +241,7 @@ wait_exec       ; wait for execution start
                 ldy #0
                 dex
                 txs                     ; initialize stack pointer to $ff (stack must be empty)
-bracket_loop    lda prog_orig,y
+bracket_loop    lda bf_program,y
                 cmp #'['
                 bne +
                 tya                     ; push current address
@@ -270,8 +271,9 @@ brackets_done   bit ppu_status          ; wait until next VBlank starts
                 inx                     ; print an error message on row 25
                 beq brackets_ok         ; Y reveals type of error
                 lda #$23
-                ldx #$20
-                jsr set_ppu_addr
+                sta ppu_addr
+                lda #$20
+                sta ppu_addr
                 ldx #(str_open_brak-strings)
                 iny
                 beq +
@@ -279,7 +281,7 @@ brackets_done   bit ppu_status          ; wait until next VBlank starts
 +               jsr print_string
                 jsr reset_ppu_addr
 -               jsr read_joypad         ; wait for button press
-                sta joypad_stat
+                sta pad_status
                 and #pad_b
                 beq -
 
@@ -288,14 +290,14 @@ brackets_done   bit ppu_status          ; wait until next VBlank starts
                 bpl -
 
                 dec program_mode        ; return to edit mode ($20 = space)
-                lda #$23
-                ldx #$20
-                jsr set_ppu_addr
+                ldy #$23
+                lda #$20
+                jsr set_ppu_addr        ; Y, A -> address
                 lda #$20
                 ldx #32
                 jsr fill_vram
                 jsr reset_ppu_addr
-                jmp wait_exec
+                jmp main_loop
 
 brackets_ok     lda #%00000000          ; disable rendering
                 sta ppu_mask
@@ -304,7 +306,7 @@ brackets_ok     lda #%00000000          ; disable rendering
                 ; that executes that instruction; the cursor ("_") is an instruction that ends the
                 ; program
                 ldx #0
-ins_repl_loop   lda prog_orig,x
+ins_repl_loop   lda bf_program,x
                 ldy #0
 -               cmp bf_instrs,y
                 beq +
@@ -312,7 +314,7 @@ ins_repl_loop   lda prog_orig,x
                 cpy #(instr_cnt-1)
                 bne -
 +               lda instr_offsets,y     ; if no match, instr_cnt-1 is "end program" instruction
-                sta prog_orig,x
+                sta bf_program,x
                 inx
                 bne ins_repl_loop
 
@@ -321,12 +323,16 @@ ins_repl_loop   lda prog_orig,x
                 inx
                 bne -
 
-                lda #$20                     ; rewrite name table
-                jsr set_ppu_addr             ; X is still 0
+                ldy #$20                ; rewrite name table
+                lda #$00
+                jsr set_ppu_addr        ; Y, A -> address
+                ;
                 ldx #(rle_exec_top-rle_data)
                 jsr print_rle_data
+                ;
                 ldx #(str_running-strings)
                 jsr print_string
+                ;
                 lda #$20                ; space
                 ldx #28
                 jsr fill_vram
@@ -356,11 +362,7 @@ keyb_loop       txa
 -               bit ppu_status
                 bpl -
 
-                lda #%10000000          ; enable NMI, show background
-                sta ppu_ctrl
-                lda #%00001010
-                sta ppu_mask
-
+                jsr set_ppu_regs        ; set ppu_scroll/ppu_ctrl/ppu_mask
                 jmp run_mode            ; actual execution of the Brainfuck program
 
 instr_offsets   db value_incr -run_mode  ; offsets of instructions in run mode
@@ -382,7 +384,7 @@ run_mode        ldx #$00
 
                 ldy #$ff                ; Y/X = address in Brainfuck code/RAM
 execute_loop    iny
-                lda prog_orig,y
+                lda bf_program,y
                 sta pointer+0
                 jmp (pointer)
 
@@ -424,9 +426,9 @@ input           bit ppu_status          ; wait until next VBlank starts
                 bpl -
 
                 stx temp
-                lda #$22                  ; print message asking for input on row 18
-                ldx #$40
-                jsr set_ppu_addr
+                ldy #$22                ; print message asking for input on row 18
+                lda #$40
+                jsr set_ppu_addr        ; Y, A -> address
                 ldx #(str_input-strings)
                 jsr print_string
 
@@ -442,9 +444,9 @@ input           bit ppu_status          ; wait until next VBlank starts
                 dex
                 bne -
 
-                lda #$22                ; restore text "Running..." on row 18
-                ldx #$40
-                jsr set_ppu_addr
+                ldy #$22                ; restore text "Running..." on row 18
+                lda #$40
+                jsr set_ppu_addr        ; Y, A -> address
                 ldx #(str_running-strings)
                 jsr print_string
 
@@ -470,19 +472,19 @@ program_end     ; Brainfuck program has finished
 -               bit ppu_status
                 bpl -
 
-                lda #$22                ; print message on row 18
-                ldx #$40
-                jsr set_ppu_addr
+                ldy #$22                ; print message on row 18
+                lda #$40
+                jsr set_ppu_addr        ; Y, A -> address
                 ldx #(str_finish-strings)
                 jsr print_string
                 jsr reset_ppu_addr
 
 -               jsr read_joypad         ; wait for button press
-                sta joypad_stat
+                sta pad_status
                 and #pad_b
                 beq -
 
-                jmp edit_mode
+                jmp setup_edit_mode
 
 ; --- NMI routine ---------------------------------------------------------------------------------
 
@@ -500,21 +502,22 @@ nmi             pha                     ; push A, X, Y
 
 nmi_edit_mode   jsr read_joypad
 
-                cpx joypad_stat         ; exit if joypad status hasn't changed
+                cpx pad_status          ; exit if joypad status hasn't changed
                 bne +
                 jmp nmi_exit
-+               stx joypad_stat
++               stx pad_status
 
                 ldx program_len         ; if trying to enter a character and there's less than
                 inx                     ; 255, add it and exit
                 beq char_entry_end
                 ldy #(instr_cnt-1)
 -               lda edit_buttons,y
-                cmp joypad_stat
+                cmp pad_status
                 bne +
                 lda #$22                ; print character over old cursor; also print new cursor
-                ldx program_len
-                jsr set_ppu_addr
+                sta ppu_addr
+                lda program_len
+                sta ppu_addr
                 lda bf_instrs,y
                 sta ppu_data
                 lda #'_'
@@ -527,31 +530,31 @@ char_entry_end
 
                 lda program_len         ; if "backspace" pressed and at least one character
                 beq +                   ; written, delete last character and exit
-                lda joypad_stat
+                lda pad_status
                 cmp #(pad_st|pad_l)
                 bne +
                 dec program_len
-                lda #$22                ; print cursor over last character and space over old
-                ldx program_len         ; cursor
-                jsr set_ppu_addr
+                ldy #$22                ; print cursor over last char and space over old cursor
+                lda program_len
+                jsr set_ppu_addr        ; Y, A -> address
                 lda #"_"
                 sta ppu_data
                 lda #$20                ; space
                 sta ppu_data
                 jmp nmi_exit
 
-+               lda joypad_stat         ; run program if requested
++               lda pad_status          ; run program if requested
                 cmp #(pad_se|pad_st)
                 bne +
                 inc program_mode
 +               jmp nmi_exit
 
 nmi_run_mode    jsr read_joypad
-                sta joypad_stat
+                sta pad_status
 
                 and #pad_b              ; exit if requested
                 beq +
-                jmp edit_mode
+                jmp setup_edit_mode
 
 +               lda outp_buflen         ; print character from buffer if necessary
                 bne +
@@ -559,9 +562,9 @@ nmi_run_mode    jsr read_joypad
 +               lda outp_buffer
                 cmp #$0a
                 beq newline
-                lda #$21
-                ldx output_len
-                jsr set_ppu_addr
+                ldy #$21
+                lda output_len
+                jsr set_ppu_addr        ; Y, A -> address
                 lda outp_buffer
                 sta ppu_data
                 inc output_len
@@ -576,9 +579,9 @@ newline         lda output_len          ; count rest of line towards maximum num
 
 nmi_input_mode  jsr read_joypad
 
-                cmp joypad_stat         ; react to buttons if joypad status has changed
+                cmp pad_status          ; react to buttons if joypad status has changed
                 beq keyb_end
-                sta joypad_stat
+                sta pad_status
                 lsr
                 bcs keyb_right          ; button: right
                 lsr
@@ -621,7 +624,7 @@ keyb_down       ldx keyboard_y
                 jmp keyb_end
 keyb_accept     dec program_mode        ; back to run mode
                 jmp keyb_end
-keyb_quit       jmp edit_mode
+keyb_quit       jmp setup_edit_mode
 keyb_end
 
                 lda keyboard_y          ; Y position of sprites
@@ -630,14 +633,14 @@ keyb_end
                 asl
                 tax
                 adc #(20*8-1)
-                sta sprite_data+0
-                sta sprite_data+4
+                sta sprite_data+1*4+0
+                sta sprite_data+2*4+0
 
                 txa                     ; sprite 0 tile and entered character
                 asl                     ; keyboard_y * 16
                 adc #$20                ; keyboard starts at character $20
                 adc keyboard_x
-                sta sprite_data+1
+                sta sprite_data+1*4+1
                 cmp #$7f                ; store last symbol on keyboard as real newline
                 bne +
                 lda #$0a
@@ -648,13 +651,17 @@ keyb_end
                 asl
                 asl
                 adc #(8*8)
-                sta sprite_data+3
-                sta sprite_data+4+3
+                sta sprite_data+1*4+3
+                sta sprite_data+2*4+3
 
                 lda #>sprite_data
                 sta oam_dma
 
 nmi_exit        jsr reset_ppu_addr      ; reset VRAM address
+
+                sec                     ; set flag to let main loop run once
+                ror run_main_loop
+
                 pla                     ; pull Y, X, A
                 tay
                 pla
@@ -685,8 +692,17 @@ reset_ppu_addr  lda #$00
                 sta ppu_addr
                 rts
 
-set_ppu_addr    sta ppu_addr
-                stx ppu_addr
+set_ppu_addr    sty ppu_addr            ; set PPU address from Y & A
+                sta ppu_addr
+                rts
+
+set_ppu_regs    lda #$00                ; reset PPU scroll
+                sta ppu_scroll
+                sta ppu_scroll
+                lda #%10000000          ; enable NMI
+                sta ppu_ctrl
+                lda #%00011110          ; show background & sprites
+                sta ppu_mask
                 rts
 
 fill_vram       sta ppu_data            ; write A to VRAM X times
@@ -917,7 +933,7 @@ pt_data         hex 00 00 00 00 00 00 00 00  ; tile $20
                 hex 60 10 10 0c 10 10 60 00  ; tile $7d
                 hex 64 98 00 00 00 00 00 00  ; tile $7e
                 ;
-                hex 04 04 24 44 fc 40 20 00  ; tile $7f (return symbol)
+                hex 04 04 24 44 fc 40 20 00  ; tile $7f (return symbol; needed in keyboard)
                 hex 00 00 ff ff ff 00 00 00  ; tile $80 (horizontal bar)
                 hex 38 38 38 38 38 38 38 38  ; tile $81 (vertical bar)
                 hex 00 00 0f 1f 3f 3c 38 38  ; tile $82 (top left corner)
