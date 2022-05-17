@@ -22,7 +22,9 @@ program_len     equ $0b    ; length of Brainfuck program (0-254)
 bf_pc           equ $0c    ; program counter (address being run) of Brainfuck program
 bf_ram_addr     equ $0d    ; RAM address of Brainfuck program
 output_len      equ $0e    ; number of characters printed by the Brainfuck program (0-255)
-temp            equ $0f    ; a temporary variable
+keyb_cursor_x   equ $0f    ; cursor X position on virtual keyboard (0-15)
+keyb_cursor_y   equ $10    ; cursor Y position on virtual keyboard (0-5)
+temp            equ $11    ; a temporary variable
 bf_program      equ $0200  ; Brainfuck program ($100 bytes)
 brackets        equ $0300  ; target addresses of "[" and "]" ($100 bytes)
 bf_ram          equ $0400  ; RAM of Brainfuck program ($100 bytes)
@@ -66,7 +68,9 @@ tile_larr       equ $84  ; left arrow
 tile_rarr       equ $85  ; right arrow
 
 ; misc
-blink_rate      equ 4    ; cursor blink rate (0 = fastest, 7 = slowest)
+blink_rate      equ 4           ; cursor blink rate (0 = fastest, 7 = slowest)
+cursor_tile1    equ $20         ; cursor tile 1 (space)
+cursor_tile2    equ tile_block  ; cursor tile 2
 
 ; --- iNES header ---------------------------------------------------------------------------------
 
@@ -105,11 +109,6 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
                 sta sprite_data,x
                 inx
                 bne -
-
-                lda #tile_block         ; set tile and attributes of 1st sprite (cursor)
-                sta sprite_data+0+1
-                lda #%00000000
-                sta sprite_data+0+2
 
                 jsr wait_vbl_start      ; wait until next VBlank starts
 
@@ -379,8 +378,8 @@ strings         ; each string: PPU address high/low, characters, null terminator
                 db "Output:", 0
                 nt_addr 1, 18, 13
                 db "Input:", 0
-                nt_addr 1, 26, 4
-                db tile_uarr, tile_darr, tile_larr, tile_rarr, "A=input B=to editor", 0
+                nt_addr 1, 26, 7
+                db tile_uarr, tile_darr, tile_larr, tile_rarr, "A=input B=exit", 0
                 ;
                 db 0  ; end of all strings
 
@@ -413,6 +412,13 @@ main_loop       bit run_main_loop       ; wait until NMI routine has set flag
                 cmp #1
                 rol pad_status
                 bcc -
+
+                ldx #cursor_tile1       ; set cursor tile according to frame counter
+                lda frame_counter
+                and #(1<<blink_rate)
+                beq +
+                ldx #cursor_tile2
++               stx sprite_data+0+1
 
                 inc frame_counter       ; advance frame counter
 
@@ -562,71 +568,33 @@ bf_instrs_end
 main_loop_run   ; process current instruction
                 ;
                 ldy bf_pc
+                cpy #program_len        ; do this here because no check done after ","
+                beq program_ended
                 ldx bf_ram_addr
                 lda bf_program,y
                 ;
-                cmp #$2d                ; "-": decrement RAM value
-                bne +
-                dec bf_ram,x
-                jmp instr_done
+                cmp #$2d                ; "-"
+                beq dec_value
+                cmp #$2b                ; "+"
+                beq inc_value
+                cmp #$3c                ; "<"
+                beq dec_ptr
+                cmp #$3e                ; ">"
+                beq inc_ptr
+                cmp #$5b                ; "["
+                beq start_loop
+                cmp #$5d                ; "]"
+                beq end_loop
+                cmp #$2e                ; "."
+                beq output
+                cmp #$2c                ; "," (glitches for some reason if optimized to BNE)
+                beq input
                 ;
-+               cmp #$2b                ; "+": increment RAM value
-                bne +
-                inc bf_ram,x
-                jmp instr_done
-                ;
-+               cmp #$3c                ; "<": decrement RAM pointer
-                bne +
-                dex
-                jmp instr_done
-                ;
-+               cmp #$3e                ; ">": increment RAM pointer
-                bne +
-                inx
-                jmp instr_done
-                ;
-+               cmp #$5b                ; "[": jump to corresponding "]" if RAM value is 0
-                bne +
-                lda bf_ram,x
-                bne +
-                lda brackets,y
-                tay
-                jmp instr_done
-                ;
-+               cmp #$5d                ; "]": jump to corresponding "[" if RAM value is not 0
-                bne +
-                lda bf_ram,x
-                beq +
-                lda brackets,y
-                tay
-                jmp instr_done
-                ;
-+               cmp #$2e                ; ".": tell NMI routine to output RAM value
-                bne +
-                lda bf_ram,x
-                sta vram_buf_value
-                lda output_len
-                sta vram_buf_adrlo
-                lda #$25
-                sta vram_buf_adrhi
-                inc output_len
-                ;
-+               cmp #$2c                ; ",": input value to RAM (not yet implemented)
-                bne instr_done
-                ;
-instr_done      iny                     ; advance program counter; store it & RAM pointer
-                sty bf_pc
+instr_done      iny                     ; advance to next instruction
+                sty bf_pc               ; store program counter & RAM pointer
                 stx bf_ram_addr
-                ;
-                cpy program_len         ; if program ended...
-                bne +
-                lda #3                  ; switch to "program ended" mode
-                sta program_mode
-                lda #$ff                ; hide cursor
-                sta sprite_data+0+0
-                jmp main_loop
 
-+               lda output_len          ; output cursor sprite coordinates
+                lda output_len          ; output cursor sprite coordinates
                 and #%11100000          ; bits of output_len: YYYXXXXX
                 lsr a
                 lsr a
@@ -641,9 +609,89 @@ instr_done      iny                     ; advance program counter; store it & RA
 
                 jmp main_loop
 
+program_ended   lda #3                  ; switch to "program ended" mode
+                sta program_mode
+                lda #$ff                ; hide cursor
+                sta sprite_data+0+0
+                jmp main_loop
+
+dec_value       dec bf_ram,x            ; decrement RAM value
+                jmp instr_done
+
+inc_value       inc bf_ram,x            ; increment RAM value
+                jmp instr_done
+
+dec_ptr         dex                     ; decrement RAM pointer
+                jmp instr_done
+
+inc_ptr         inx                     ; increment RAM pointer
+                jmp instr_done
+
+start_loop      lda bf_ram,x            ; jump to corresponding "]" if RAM value is 0
+                bne instr_done
+                lda brackets,y
+                tay
+                jmp instr_done
+
+end_loop        lda bf_ram,x            ; jump to corresponding "[" if RAM value is not 0
+                beq instr_done
+                lda brackets,y
+                tay
+                jmp instr_done
+
+output          lda bf_ram,x            ; output value from RAM (tell NMI routine to do it)
+                sta vram_buf_value
+                lda output_len
+                sta vram_buf_adrlo
+                lda #$25
+                sta vram_buf_adrhi
+                inc output_len
+                jmp instr_done
+
+input           lda #2                  ; input value to RAM (switch to input mode)
+                sta program_mode
+                lda #0
+                sta keyb_cursor_x
+                sta keyb_cursor_y
+                inc bf_pc               ; advance program counter (we don't run instr_done)
+                jmp main_loop
+
 ; --- Main loop - program waiting for input (mode 2) ----------------------------------------------
 
-main_loop_input
+main_loop_input lda prev_pad_status     ; ignore buttons if anything was pressed on last frame
+                bne inp_btns_done
+                ;
+                lda pad_status          ; react to buttons
+                ;
+                cmp #pad_right
+                bne +
+                inc keyb_cursor_x
+                lda keyb_cursor_x
+                and #%00001111
+                sta keyb_cursor_x
+                jmp inp_btns_done
+                ;
++               cmp #pad_left
+                bne inp_btns_done
+                dec keyb_cursor_x
+                lda keyb_cursor_x
+                and #%00001111
+                sta keyb_cursor_x
+
+inp_btns_done   lda keyb_cursor_y       ; update cursor sprite coordinates
+                asl a
+                asl a
+                asl a
+                adc #(19*8-1)
+                sta sprite_data+0+0
+                ;
+                lda keyb_cursor_x
+                asl a
+                asl a
+                asl a
+                adc #(8*8)
+                sta sprite_data+0+3
+
                 jmp main_loop
 
 ; --- Main loop - program ended (mode 3) ----------------------------------------------------------
@@ -685,17 +733,7 @@ nmi             pha                     ; push A, X, Y
                 lda #$00
                 sta vram_buf_adrhi
 
-+               ldy #$3f                ; set 2nd color of 1st sprite subpalette according to
-                lda #$11                ; frame counter
-                jsr set_ppu_addr
-                ldx #color_bg
-                lda frame_counter
-                and #(1<<blink_rate)
-                beq +
-                ldx #color_fg
-+               stx ppu_data
-
-                jsr set_ppu_regs        ; set ppu_scroll/ppu_ctrl/ppu_mask
++               jsr set_ppu_regs        ; set ppu_scroll/ppu_ctrl/ppu_mask
 
                 sec                     ; set flag to let main loop run once
                 ror run_main_loop
