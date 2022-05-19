@@ -33,25 +33,41 @@ Warning: you may get a seizure.
 Uses CHR RAM. Actual PRG ROM size is 1 KiB.
 
 ### Qalle's Brainfuck
-A Brainfuck interpreter.
+Brainfuck interpreter
 
 ![brainfuck.asm](brainfuck.png)
 
 There are two modes:
 * edit mode:
   * program starts in this mode
-  * enter and run Brainfuck program using buttons and button combinations listed
-  * note: Brainfuck program won't run if brackets don't match
+  * cursor (blinking square) is always on program input area
 * run mode:
-  * if cursor is on virtual keyboard, enter character using buttons listed
-  * if cursor is on output area, Brainfuck program is running
-  * if cursor is not visible, Brainfuck program has finished
-  * whenever in run mode, press B to return to edit mode
+  * if cursor not visible: Brainfuck program finished or reached maximum output size
+  * if cursor on output area: Brainfuck program running
+  * if cursor on virtual keyboard: user expected to input character
+  * press B at any time to return to edit mode
+
+Notes on character set:
+* output behavior:
+  * byte `0x0a`: moves cursor to start of next line
+  * other bytes: advance cursor by one
+* output appearance:
+  * bytes `0x20` to `0x7e`: as in ASCII
+  * some bytes from `0x80` on: special characters
+  * other bytes: blank
+* input (virtual keyboard):
+  * newline symbol (&#x21b5; at bottom right): byte `0x0a`
+  * other symbols: bytes `0x20` to `0x7e`
+
+Misc notes:
+* Brainfuck program won't run if brackets don't match
+* Brainfuck program stops when end is reached or 256 characters have been printed
 
 Limitations:
 * maximum program size: 255 instructions
 * Brainfuck RAM size: 256 bytes
-* slow (1 instruction/frame)
+* maximum output size: 256 bytes
+* speed: 1 instruction/frame
 
 Uses CHR RAM. Actual PRG ROM size is 2 KiB.
 
