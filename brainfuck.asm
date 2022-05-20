@@ -2,7 +2,7 @@
 
 ; TODO/notes:
 ; - the program is undergoing changes that will allow it to run more than one Brainfuck
-;   instruction per frame (a persistent bug has halted this work; see main_loop)
+;   instruction per frame
 ; - micro-optimize (JMP -> branch, delete unnecessary CLC/SEC) only after the program has been
 ;   THOROUGHLY tested
 
@@ -17,7 +17,7 @@
 ; RAM
 pointer         equ $00    ; memory pointer (2 bytes)
 program_mode    equ $02    ; see constants below
-nmi_done        equ $03    ; see above (negative=yes)
+nmi_done        equ $03    ; see above ($00 = no, $80 = yes)
 ppu_ctrl_copy   equ $04    ; copy of ppu_ctrl
 frame_counter   equ $05    ; for blinking cursors
 pad_status      equ $06    ; joypad status
@@ -32,7 +32,7 @@ output_len      equ $0e    ; number of characters printed by the Brainfuck progr
 keyb_x          equ $0f    ; cursor X position on virtual keyboard (0-15)
 keyb_y          equ $10    ; cursor Y position on virtual keyboard (0-5)
 temp            equ $11    ; a temporary variable
-nmi_done_copy   equ $12    ; see above (negative=yes)
+nmi_done_copy   equ $12    ; see above (negative = yes)
 bf_program      equ $0200  ; Brainfuck program ($100 bytes)
 brackets        equ $0300  ; target addresses of "[" and "]" ($100 bytes)
 bf_ram          equ $0400  ; RAM of Brainfuck program ($100 bytes)
@@ -411,18 +411,14 @@ horz_bars_lo    dl $20e0, $2200, $24e0, $2600  ; low  bytes
 
 ; --- Main loop - common --------------------------------------------------------------------------
 
-main_loop       lda nmi_done            ; during main loop, only read copy of flag to avoid race
-                sta nmi_done_copy       ; condition
+main_loop       asl nmi_done            ; atomically clear and copy flag to avoid race condition
+                ror nmi_done_copy
                 ;
-                bit nmi_done_copy
+                bit nmi_done_copy       ; run once-per-frame stuff
                 bpl +
-                jsr once_per_frame      ; once-per-frame stuff
+                jsr once_per_frame
                 ;
-;+               bit nmi_done_copy      ; BUG: if these lines are uncommented, program glitches
-;                bpl +                  ; for some reason (jump engine not run every frame?)
-                jsr jump_engine         ; run mode-specific code
-                ;
-+               lsr nmi_done            ; clear (original) flag
++               jsr jump_engine         ; run mode-specific stuff
                 jmp main_loop
 
 once_per_frame  ; stuff that's done only once per frame
@@ -455,15 +451,15 @@ once_per_frame  ; stuff that's done only once per frame
 jump_engine     ; jump engine (run one sub depending on program mode); see NESDev Wiki
                 ; note: don't inline this sub
                 ;
-                ;bit nmi_done_copy       ; only run once per frame;
-                ;bpl +                   ; TODO: only do this in modes that need it
+                bit nmi_done_copy       ; only run once per frame;
+                bpl +                   ; TODO: only do this in modes that need it
                 ;
                 ldx program_mode        ; push target address minus one, high byte first
                 lda jump_table_hi,x
                 pha
                 lda jump_table_lo,x
                 pha
-                rts                     ; pull address, low byte first; jump to address plus one
++               rts                     ; pull address, low byte first; jump to address plus one
 
 jump_table_hi   dh main_loop_edit -1    ; jump table - high bytes
                 dh main_loop_clr1 -1
@@ -879,8 +875,8 @@ buf_flush_done  lda program_mode        ; if in clear mode, fill top or bottom h
 
 clear_done      jsr set_ppu_regs        ; set ppu_scroll/ppu_ctrl/ppu_mask
 
-                sec                     ; set flag to let once-per-frame stuff run
-                ror nmi_done
+                lda #%10000000          ; set flag to let once-per-frame stuff run
+                sta nmi_done            ; note: other negative values won't do
 
                 pla                     ; pull Y, X, A
                 tay
