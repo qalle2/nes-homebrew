@@ -1,15 +1,23 @@
 ; Qalle's Brainfuck (NES, ASM6)
 
+; TODO/notes:
+; - the program is undergoing changes that will allow it to run more than one Brainfuck
+;   instruction per frame (a persistent bug has halted this work; see main_loop)
+; - micro-optimize (JMP -> branch, delete unnecessary CLC/SEC) only after the program has been
+;   THOROUGHLY tested
+
 ; --- Constants -----------------------------------------------------------------------------------
 
 ; notes:
 ; - "VRAM buffer" = what to write to PPU on next VBlank
 ; - bottom half of stack ($0100-$017f) is not available for "normal" stack
+; - nmi_done & nmi_done_copy: did NMI routine just run?; used for once-per-frame stuff;
+;   the former is updated in real time, the latter only at start of main loop
 
 ; RAM
 pointer         equ $00    ; memory pointer (2 bytes)
 program_mode    equ $02    ; see constants below
-run_main_loop   equ $03    ; main loop allowed to run? (MSB: 0=no, 1=yes)
+nmi_done        equ $03    ; see above (negative=yes)
 ppu_ctrl_copy   equ $04    ; copy of ppu_ctrl
 frame_counter   equ $05    ; for blinking cursors
 pad_status      equ $06    ; joypad status
@@ -24,6 +32,7 @@ output_len      equ $0e    ; number of characters printed by the Brainfuck progr
 keyb_x          equ $0f    ; cursor X position on virtual keyboard (0-15)
 keyb_y          equ $10    ; cursor Y position on virtual keyboard (0-5)
 temp            equ $11    ; a temporary variable
+nmi_done_copy   equ $12    ; see above (negative=yes)
 bf_program      equ $0200  ; Brainfuck program ($100 bytes)
 brackets        equ $0300  ; target addresses of "[" and "]" ($100 bytes)
 bf_ram          equ $0400  ; RAM of Brainfuck program ($100 bytes)
@@ -75,7 +84,7 @@ mode_input      equ 4    ; BF program waiting for input
 mode_ended      equ 5    ; BF program finished
 
 ; misc
-blink_rate      equ 4           ; cursor blink rate (0 = fastest, 7 = slowest)
+blink_rate      equ 3           ; cursor blink rate (0 = fastest, 7 = slowest)
 cursor_tile1    equ $20         ; cursor tile 1 (space)
 cursor_tile2    equ tile_block  ; cursor tile 2
 
@@ -191,8 +200,8 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
                 lda strings,x           ; byte (0 = end of string)
                 beq +
                 sta ppu_data
-                bne -                   ; unconditional
-+               beq --                  ; next string (unconditional)
+                jmp -
++               jmp --                  ; next string
 
 strings_end     ldx #(4-1)              ; draw horizontal bars in NT0 & NT1
 -               ldy horz_bars_hi,x
@@ -402,10 +411,21 @@ horz_bars_lo    dl $20e0, $2200, $24e0, $2600  ; low  bytes
 
 ; --- Main loop - common --------------------------------------------------------------------------
 
-main_loop       bit run_main_loop       ; wait until NMI routine has set flag
-                bpl main_loop
+main_loop       lda nmi_done            ; during main loop, only read copy of flag to avoid race
+                sta nmi_done_copy       ; condition
                 ;
-                lsr run_main_loop       ; clear flag
+                bit nmi_done_copy
+                bpl +
+                jsr once_per_frame      ; once-per-frame stuff
+                ;
+;+               bit nmi_done_copy      ; BUG: if these lines are uncommented, program glitches
+;                bpl +                  ; for some reason (jump engine not run every frame?)
+                jsr jump_engine         ; run mode-specific code
+                ;
++               lsr nmi_done            ; clear (original) flag
+                jmp main_loop
+
+once_per_frame  ; stuff that's done only once per frame
 
                 lda pad_status          ; store previous joypad status
                 sta prev_pad_status
@@ -430,11 +450,13 @@ main_loop       bit run_main_loop       ; wait until NMI routine has set flag
 
                 inc frame_counter       ; advance frame counter
 
-                jsr jump_engine         ; run mode-specific code
-                jmp main_loop
+                rts
 
 jump_engine     ; jump engine (run one sub depending on program mode); see NESDev Wiki
                 ; note: don't inline this sub
+                ;
+                ;bit nmi_done_copy       ; only run once per frame;
+                ;bpl +                   ; TODO: only do this in modes that need it
                 ;
                 ldx program_mode        ; push target address minus one, high byte first
                 lda jump_table_hi,x
@@ -495,9 +517,9 @@ del_last_char   ldy program_len         ; if there's >= 1 instruction...
                 sty program_len
                 sty vram_buf_adrlo
                 lda #$21
-                sta vram_buf_adrhi
+                sta vram_buf_adrhi      ; set this byte last to avoid race condition
                 ;
-                bne char_entry_end      ; unconditional
+                jmp char_entry_end
 
 enter_instr     ldy program_len         ; if program is < $ff characters...
                 cpy #$ff
@@ -509,9 +531,9 @@ enter_instr     ldy program_len         ; if program is < $ff characters...
                 sty vram_buf_adrlo
                 inc program_len
                 lda #$21
-                sta vram_buf_adrhi
+                sta vram_buf_adrhi      ; set this byte last to avoid race condition
                 ;
-                bne char_entry_end      ; unconditional
+                jmp char_entry_end
 
                 ; Brainfuck instructions and corresponding buttons in edit mode
                 ;
@@ -632,7 +654,7 @@ main_loop_run   lda pad_status          ; stop program if B pressed
                 beq end_loop
                 cmp #$2e                ; "."
                 beq output
-                bne input               ; "," (unconditional)
+                jmp input               ; ","
                 ;
 instr_done      sty bf_pc               ; store new program counter & RAM pointer
                 stx bf_ram_addr
@@ -675,7 +697,8 @@ output          lda bf_ram,x            ; if newline ($0a)...
                 bne +
                 ;
                 lda output_len          ; move output cursor to start of next line
-                adc #(32-1)             ; carry is always set
+                clc
+                adc #32
                 and #%11100000
                 sta output_len
                 jmp ++
@@ -684,14 +707,14 @@ output          lda bf_ram,x            ; if newline ($0a)...
                 lda output_len
                 sta vram_buf_adrlo
                 lda #$25
-                sta vram_buf_adrhi
+                sta vram_buf_adrhi      ; set this byte last to avoid race condition
                 inc output_len
                 ;
 ++              beq to_ended_mode       ; if $100 characters printed, end program (ends with RTS)
-                bne instr_done          ; unconditional
+                jmp instr_done
 
 input           inc program_mode        ; input value to RAM (switch to mode_input)
-                bne instr_done          ; unconditional
+                jmp instr_done
 
 ; --- Main loop - Brainfuck program waiting for input ---------------------------------------------
 
@@ -713,24 +736,24 @@ main_loop_input lda prev_pad_status     ; ignore buttons if anything was pressed
                 bcs keyb_exit           ; B
                 bne keyb_input          ; A
                 ;
-                beq upd_keyb_cursor     ; unconditional, ends with RTS
+                jmp upd_keyb_cursor     ; ends with RTS
 
 keyb_right      ldx keyb_x
                 inx
-                bne +                   ; unconditional
+                jmp +
 keyb_left       ldx keyb_x
                 dex
 +               txa
                 and #%00001111
                 sta keyb_x
-                bpl upd_keyb_cursor     ; unconditional, ends with RTS
+                jmp upd_keyb_cursor     ; ends with RTS
                 ;
 keyb_down       ldx keyb_y
                 inx
                 cpx #6
                 bne +
                 ldx #0
-                beq +                   ; unconditional
+                jmp +
 keyb_up         ldx keyb_y
                 dex
                 bpl +
@@ -763,14 +786,16 @@ upd_keyb_cursor lda keyb_y              ; update coordinates of keyboard cursor 
                 asl a
                 asl a
                 asl a
-                adc #(20*8-1)           ; carry is always clear
+                clc
+                adc #(20*8-1)
                 sta sprite_data+0+0
                 ;
                 lda keyb_x
                 asl a
                 asl a
                 asl a
-                adc #(8*8)              ; carry is always clear
+                clc
+                adc #(8*8)
                 sta sprite_data+0+3
                 ;
                 rts
@@ -838,7 +863,7 @@ buf_flush_done  lda program_mode        ; if in clear mode, fill top or bottom h
                 cmp #mode_clear1
                 bne +
                 lda #$00
-                beq ++                  ; unconditional
+                jmp ++
                 ;
 +               cmp #mode_clear2
                 bne clear_done
@@ -854,8 +879,8 @@ buf_flush_done  lda program_mode        ; if in clear mode, fill top or bottom h
 
 clear_done      jsr set_ppu_regs        ; set ppu_scroll/ppu_ctrl/ppu_mask
 
-                sec                     ; set flag to let main loop run once
-                ror run_main_loop
+                sec                     ; set flag to let once-per-frame stuff run
+                ror nmi_done
 
                 pla                     ; pull Y, X, A
                 tay

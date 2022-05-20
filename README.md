@@ -53,7 +53,7 @@ Notes on character set:
   * other bytes: advance cursor by one
 * output appearance:
   * bytes `0x20` to `0x7e`: as in ASCII
-  * some bytes from `0x80` on: special characters
+  * some bytes from `0x7f` on: special characters
   * other bytes: blank
 * input (virtual keyboard):
   * newline symbol (&#x21b5; at bottom right): byte `0x0a`
