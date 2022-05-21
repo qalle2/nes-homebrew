@@ -1,12 +1,20 @@
-An infinite loop:
+infinite loop:
     +[]
 
-Print all characters:
-    +[.+]
+delay:
+    +[>+[+]<+]
 
-Input characters (lower case letters), print them in upper case; space to quit:
+print bytes 0x00-0xff:
+    .+[.+]
+
+print "A" (0x41):
+    ++++++++[>++++++++<-] >+.
+or:
+    ++++[>++++<-] >[>++++<-] >+.
+
+input characters (lower case letters), print them in upper case; space to quit:
     +[,>++++ [<-------->-] <.]
 
-Print "Hello, World!" and a newline (from Wikipedia):
+print "Hello, World!\n" (from Wikipedia):
     ++++++++[ > ++++[ >++>+++>+++>+<<<< -] >+>+>->>+[<]< -]
     >>. >---.+++++++..+++. >>. <-. <.+++.------.--------. >>+. >++.

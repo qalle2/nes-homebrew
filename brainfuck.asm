@@ -1,8 +1,6 @@
 ; Qalle's Brainfuck (NES, ASM6)
 
 ; TODO/notes:
-; - the program is undergoing changes that will allow it to run more than one Brainfuck
-;   instruction per frame
 ; - micro-optimize (JMP -> branch, delete unnecessary CLC/SEC) only after the program has been
 ;   THOROUGHLY tested
 
@@ -10,9 +8,9 @@
 
 ; notes:
 ; - "VRAM buffer" = what to write to PPU on next VBlank
-; - bottom half of stack ($0100-$017f) is not available for "normal" stack
-; - nmi_done & nmi_done_copy: did NMI routine just run?; used for once-per-frame stuff;
-;   the former is updated in real time, the latter only at start of main loop
+; - bottom half of stack ($0100-$017f) is used for other purposes
+; - nmi_done: did the NMI routine just run? used for once-per-frame stuff; set by NMI,
+;   read and cleared at the start of main loop
 
 ; RAM
 pointer         equ $00    ; memory pointer (2 bytes)
@@ -32,7 +30,6 @@ output_len      equ $0e    ; number of characters printed by the Brainfuck progr
 keyb_x          equ $0f    ; cursor X position on virtual keyboard (0-15)
 keyb_y          equ $10    ; cursor Y position on virtual keyboard (0-5)
 temp            equ $11    ; a temporary variable
-nmi_done_copy   equ $12    ; see above (negative = yes)
 bf_program      equ $0200  ; Brainfuck program ($100 bytes)
 brackets        equ $0300  ; target addresses of "[" and "]" ($100 bytes)
 bf_ram          equ $0400  ; RAM of Brainfuck program ($100 bytes)
@@ -55,12 +52,12 @@ joypad2         equ $4017
 ; joypad button bitmasks
 pad_a           equ 1<<7
 pad_b           equ 1<<6
-pad_select      equ 1<<5
+pad_sel         equ 1<<5
 pad_start       equ 1<<4
-pad_up          equ 1<<3
-pad_down        equ 1<<2
-pad_left        equ 1<<1
-pad_right       equ 1<<0
+pad_u           equ 1<<3
+pad_d           equ 1<<2
+pad_l           equ 1<<1
+pad_r           equ 1<<0
 
 ; colors
 color_bg        equ $0f  ; background (black)
@@ -411,14 +408,16 @@ horz_bars_lo    dl $20e0, $2200, $24e0, $2600  ; low  bytes
 
 ; --- Main loop - common --------------------------------------------------------------------------
 
-main_loop       asl nmi_done            ; atomically clear and copy flag to avoid race condition
-                ror nmi_done_copy
+main_loop       asl nmi_done            ; to avoid missing the flag being set by NMI routine,
+                bcs +                   ; clear and read it using a single instruction
                 ;
-                bit nmi_done_copy       ; run once-per-frame stuff
-                bpl +
-                jsr once_per_frame
+                lda program_mode        ; not first round after VBlank;
+                cmp #mode_run           ; only run mode-specific stuff if in run mode
+                bne main_loop
+                jsr main_loop_run
+                jmp main_loop
                 ;
-+               jsr jump_engine         ; run mode-specific stuff
++               jsr once_per_frame      ; first round after VBlank; run once-per-frame stuff
                 jmp main_loop
 
 once_per_frame  ; stuff that's done only once per frame
@@ -446,20 +445,17 @@ once_per_frame  ; stuff that's done only once per frame
 
                 inc frame_counter       ; advance frame counter
 
-                rts
-
-jump_engine     ; jump engine (run one sub depending on program mode); see NESDev Wiki
-                ; note: don't inline this sub
-                ;
-                bit nmi_done_copy       ; only run once per frame;
-                bpl +                   ; TODO: only do this in modes that need it
+                ; jump to one sub depending on program mode
+                ; note: RTS in the subs below will act like RTS in this sub
+                ; see https://www.nesdev.org/wiki/Jump_table
+                ; and https://www.nesdev.org/wiki/RTS_Trick
                 ;
                 ldx program_mode        ; push target address minus one, high byte first
                 lda jump_table_hi,x
                 pha
                 lda jump_table_lo,x
                 pha
-+               rts                     ; pull address, low byte first; jump to address plus one
+                rts                     ; pull address, low byte first; jump to address plus one
 
 jump_table_hi   dh main_loop_edit -1    ; jump table - high bytes
                 dh main_loop_clr1 -1
@@ -481,7 +477,7 @@ main_loop_edit  lda pad_status          ; react to buttons
                 cmp prev_pad_status     ; skip if joypad status not changed
                 beq char_entry_end
                 ;
-                cmp #(pad_select|pad_start)
+                cmp #(pad_sel|pad_start)
                 beq run_program
                 ;
                 cmp #pad_start
@@ -532,16 +528,8 @@ enter_instr     ldy program_len         ; if program is < $ff characters...
                 jmp char_entry_end
 
                 ; Brainfuck instructions and corresponding buttons in edit mode
-                ;
-edit_buttons    db pad_up, pad_down
-                db pad_left, pad_right
-                db pad_b, pad_a
-                db pad_select|pad_b, pad_select|pad_a
-                ;
-bf_instrs       db "+", "-"
-                db "<", ">"
-                db "[", "]"
-                db ",", "."
+edit_buttons    db pad_u, pad_d, pad_l, pad_r, pad_b, pad_a, pad_sel|pad_b, pad_sel|pad_a
+bf_instrs       db "+",   "-",   "<",   ">",   "[",   "]",   ",",           "."
 bf_instrs_end
 
 find_brackets   ; for each bracket in Brainfuck program, store index of corresponding bracket in
@@ -621,10 +609,16 @@ main_loop_clr2  inc program_mode        ; switch to mode_run
 
 ; --- Main loop - Brainfuck program running -------------------------------------------------------
 
+; the only part of main loop that's run as frequently as possible instead of once per frame
+
 main_loop_run   lda pad_status          ; stop program if B pressed
                 cmp #pad_b
                 bne +
                 jmp to_edit_mode        ; ends with RTS
+
++               lda vram_buf_adrhi      ; wait until NMI routine has flushed VRAM buffer
+                beq +
+                rts
 
 +               ldy bf_pc               ; incremented PC -> Y; check for end of program
                 iny

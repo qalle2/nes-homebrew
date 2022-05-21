@@ -67,7 +67,7 @@ Limitations:
 * maximum program size: 255 instructions
 * Brainfuck RAM size: 256 bytes
 * maximum output size: 256 bytes
-* speed: 1 instruction/frame
+* output speed: 1 character/frame
 
 Uses CHR RAM. Actual PRG ROM size is 2 KiB.
 
