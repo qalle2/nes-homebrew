@@ -7,33 +7,36 @@
 ; --- Constants -----------------------------------------------------------------------------------
 
 ; notes:
+; - only the first sprite slot is actually used, and the other slots only need their Y positions
+;   to be set to $ff, so the OAM page accommodates many other variables at addresses
+;   not divisible by 4 ($05-$07, $09-$0b, $0d-$0f, ...)
 ; - "VRAM buffer" = what to write to PPU on next VBlank
 ; - bottom half of stack ($0100-$017f) is used for other purposes
 ; - nmi_done: did the NMI routine just run? used for once-per-frame stuff; set by NMI,
 ;   read and cleared at the start of main loop
 
 ; RAM
-pointer         equ $00    ; memory pointer (2 bytes)
-program_mode    equ $02    ; see constants below
-nmi_done        equ $03    ; see above ($00 = no, $80 = yes)
-ppu_ctrl_copy   equ $04    ; copy of ppu_ctrl
-frame_counter   equ $05    ; for blinking cursors
-pad_status      equ $06    ; joypad status
-prev_pad_status equ $07    ; previous joypad status
-vram_buf_adrhi  equ $08    ; VRAM buffer - high byte of address ($00 = buffer is empty)
-vram_buf_adrlo  equ $09    ; VRAM buffer - low  byte of address
-vram_buf_value  equ $0a    ; VRAM buffer - value
-program_len     equ $0b    ; length of Brainfuck program (0-$fe)
-bf_pc           equ $0c    ; program counter of Brainfuck program (preincremented)
-bf_ram_addr     equ $0d    ; RAM address of Brainfuck program
-output_len      equ $0e    ; number of characters printed by the Brainfuck program (0-$fe)
-keyb_x          equ $0f    ; cursor X position on virtual keyboard (0-15)
-keyb_y          equ $10    ; cursor Y position on virtual keyboard (0-5)
-temp            equ $11    ; a temporary variable
+sprite_data     equ $00    ; OAM page ($100 bytes, see above)
+pointer         equ $05    ; memory pointer (2 bytes)
+program_mode    equ $07    ; see constants below
+nmi_done        equ $09    ; see above ($00 = no, $80 = yes)
+ppu_ctrl_copy   equ $0a    ; copy of ppu_ctrl
+frame_counter   equ $0b    ; for blinking cursors
+pad_status      equ $0d    ; joypad status
+prev_pad_status equ $0e    ; previous joypad status
+vram_buf_adrhi  equ $0f    ; VRAM buffer - high byte of address ($00 = buffer is empty)
+vram_buf_adrlo  equ $11    ; VRAM buffer - low  byte of address
+vram_buf_value  equ $12    ; VRAM buffer - value
+program_len     equ $13    ; length of Brainfuck program (0-$fe)
+bf_pc           equ $15    ; program counter of Brainfuck program (preincremented)
+bf_ram_addr     equ $16    ; RAM address of Brainfuck program
+output_len      equ $17    ; number of characters printed by the Brainfuck program (0-$fe)
+keyb_x          equ $19    ; cursor X position on virtual keyboard (0-15)
+keyb_y          equ $1a    ; cursor Y position on virtual keyboard (0-5)
+temp            equ $1b    ; a temporary variable
 bf_program      equ $0200  ; Brainfuck program ($100 bytes)
 brackets        equ $0300  ; target addresses of "[" and "]" ($100 bytes)
 bf_ram          equ $0400  ; RAM of Brainfuck program ($100 bytes)
-sprite_data     equ $0500  ; OAM page ($100 bytes)
 
 ; memory-mapped registers
 ppu_ctrl        equ $2000
@@ -114,12 +117,19 @@ reset           ; initialize the NES; see https://wiki.nesdev.org/w/index.php/In
 
                 jsr wait_vbl_start      ; wait until next VBlank starts
 
-                ldx #0                  ; clear zero page and Brainfuck code; hide all sprites
--               lda #$00
-                sta $00,x
+                lda #$00                ; clear sprite/variables page and Brainfuck code
+                ldx #0
+-               sta sprite_data,x
                 sta bf_program,x
-                lda #$ff
-                sta sprite_data,x
+                inx
+                bne -
+
+                lda #$ff                ; hide all sprites (set Y positions to $ff)
+                ldx #0
+-               sta sprite_data,x
+                inx
+                inx
+                inx
                 inx
                 bne -
 
