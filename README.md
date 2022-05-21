@@ -65,7 +65,7 @@ Misc notes:
 
 Limitations:
 * maximum program size: 255 instructions
-* Brainfuck RAM size: 256 bytes
+* Brainfuck RAM size: 1 KiB
 * maximum output size: 256 bytes
 * output speed: 1 character/frame
 
