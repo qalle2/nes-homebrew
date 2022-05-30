@@ -6,11 +6,11 @@ Thanks to [PDRoms](https://pdroms.de) for archiving some of these programs.
 Table of contents:
 * [Files for each program](#files-for-each-program)
 * [The programs](#the-programs)
-  * [Gradient Demo](#gradient-demo)
   * [Video](#video)
   * [Hello World](#hello-world)
   * [Transgender flag](#transgender-flag)
   * [Clock](#clock)
+  * [Gradient Demo](#gradient-demo)
   * [Qalle's Brainfuck](#qalles-brainfuck)
 
 ## Files for each program
@@ -23,14 +23,6 @@ Table of contents:
 * `example.png`: screenshot
 
 ## The programs
-
-### Gradient Demo
-Shows an animated gradient and moving text.
-Warning: you may get a seizure.
-
-![gradient.asm](gradient.png)
-
-Uses CHR RAM. Actual PRG ROM size is 1 KiB.
 
 ### Video
 Plays a short video of Doom gameplay (64&times;48 pixels, 4 colors, 10 fps, no audio).
@@ -61,6 +53,9 @@ d0fa8810f2a90a8d0120000102000201
 
 ### Clock
 moved to [its own repo](https://github.com/qalle2/nes-clock/)
+
+### Gradient Demo
+moved to [its own repo](https://github.com/qalle2/nes-gradient/)
 
 ### Qalle's Brainfuck
 moved to [its own repo](https://github.com/qalle2/nes-bf/)
