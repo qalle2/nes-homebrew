@@ -9,9 +9,6 @@ Table of contents:
   * [Video](#video)
   * [Hello World](#hello-world)
   * [Transgender flag](#transgender-flag)
-  * [Clock](#clock)
-  * [Gradient Demo](#gradient-demo)
-  * [Qalle's Brainfuck](#qalles-brainfuck)
 
 ## Files for each program
 
@@ -50,12 +47,3 @@ a92020f1ffa005b9ebffa2c08d0720ca
 d0fa8810f2a90a8d0120000102000201
 8d06208e06206025210030a1ffebff
 ```
-
-### Clock
-moved to [its own repo](https://github.com/qalle2/nes-clock/)
-
-### Gradient Demo
-moved to [its own repo](https://github.com/qalle2/nes-gradient/)
-
-### Qalle's Brainfuck
-moved to [its own repo](https://github.com/qalle2/nes-bf/)
