@@ -29,12 +29,11 @@ joypad2         equ $4017
 ; --- iNES header -------------------------------------------------------------
 
                 ; see https://wiki.nesdev.org/w/index.php/INES
-                ;
                 base $0000
                 db $4e, $45, $53, $1a    ; file id ("NES\x1a")
                 db 1, 1                  ; 16 KiB PRG ROM, 8 KiB CHR ROM
                 db %00000000, %00000000  ; NROM mapper, horizontal mirroring
-                pad $0010, $00           ; unused
+                pad $0010, $00           ; unused (eight $00 bytes)
 
 ; --- Main program ------------------------------------------------------------
 
@@ -69,6 +68,12 @@ reset           ; initialize the NES;
                 lda #$02                ; text color (dark blue)
                 sta ppu_data
 
+                ; prevent palette corruption; see
+                ; https://www.nesdev.org/wiki/PPU_registers#Palette_corruption
+                ldx #$3f
+                lda #$00
+                jsr set_ppu_addr        ; X * 256 + A -> PPU address
+
                 ; clear 1st Name Table and Attribute Table (4*256 bytes)
                 ;
                 ldx #$20
@@ -77,11 +82,11 @@ reset           ; initialize the NES;
                 ldy #4
                 tax
                 ;
-clr_loop        sta ppu_data
+nt_clear_loop   sta ppu_data
                 inx
-                bne clr_loop
+                bne nt_clear_loop
                 dey
-                bne clr_loop
+                bne nt_clear_loop
 
                 ; copy text to 1st Name Table (3rd row, 2nd column)
                 ;
@@ -90,11 +95,11 @@ clr_loop        sta ppu_data
                 jsr set_ppu_addr        ; X * 256 + A -> PPU address
                 ldx #0                  ; source index
                 ;
-copy_loop       lda text,x
+nt_copy_loop    lda text,x
                 bmi exit_copy_loop      ; $80-$ff = terminator
                 sta ppu_data
                 inx
-                jmp copy_loop
+                jmp nt_copy_loop
 
 exit_copy_loop  jsr wait_vbl_start
 
@@ -135,10 +140,13 @@ text            ; the text to print (tile indexes)
                 db $02, $06, $07, $05, $03, $09       ; "World!"
                 db $80                                ; terminator ($80-$ff)
 
+nmi             ; interrupt routines (both empty)
+irq             rti
+
 ; --- Interrupt vectors -------------------------------------------------------
 
                 pad $fffa, $ff          ; end of CPU memory space
-                dw $ffff, reset, $ffff  ; NMI (unused), reset, IRQ (unused)
+                dw nmi, reset, irq      ; NMI (unused), reset, IRQ (unused)
 
 ; --- CHR ROM -----------------------------------------------------------------
 
